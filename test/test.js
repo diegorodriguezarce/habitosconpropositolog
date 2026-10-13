@@ -37,6 +37,8 @@ function sinFechas(o, ruta = 'resultado') {
   if (o && typeof o === 'object') Object.keys(o).forEach((k) => sinFechas(o[k], ruta + '.' + k));
 }
 
+const SIN_SEGURO = ['Pareja primera vez', 'Pareja control', 'Mediciones'];
+
 const pruebas = [];
 const prueba = (nombre, fn) => pruebas.push({ nombre, fn });
 
@@ -79,13 +81,13 @@ prueba('setup sobre una hoja vieja completa vacíos sin pisar datos', () => {
     ['Curridabat', 'Encargado Curridabat', 0.35, 'Total facturado', 'Sí'],
   ]);
   ctx.setup();
-  igual(a.getRange(1, 1, 2, 5).getValues(), [
-    ['Aseguradora', 'Monto aseguradora', 'Activa', 'Monto paciente', 'Ubicaciones'],
-    ['Sana Sana', 8500, 'Sí', 16000, 'Escazú'],
+  igual(a.getRange(1, 1, 2, 6).getValues(), [
+    ['Aseguradora', 'Monto aseguradora', 'Activa', 'Monto paciente', 'Ubicaciones', 'Excepto tipos'],
+    ['Sana Sana', 8500, 'Sí', 16000, 'Escazú', 'Pareja primera vez, Pareja control, Mediciones'],
   ]);
   igual(u.getRange(2, 1, 2, 3).getValues(), [['Escazú', 'Andrea', 0.4], ['Curridabat', 'Encargado Curridabat', 0.35]]);
   const b = ctx.getBootstrap();
-  igual(b.cats.aseguradoras, [{ nombre: 'Sana Sana', monto: 8500, montoPaciente: 16000, ubicaciones: ['Escazú'] }]);
+  igual(b.cats.aseguradoras, [{ nombre: 'Sana Sana', monto: 8500, montoPaciente: 16000, ubicaciones: ['Escazú'], exceptoTipos: SIN_SEGURO }]);
 });
 
 prueba('sincronizarTarifas agrega ubicaciones nuevas sin perder montos ni recargar', () => {
@@ -106,7 +108,7 @@ prueba('bootstrap entrega catálogos y nada con Date', () => {
   sinFechas(b);
   igual(b.cats.formas, ['SINPE', 'Tarjeta']);
   igual(b.cats.ubicaciones.map((u) => [u.nombre, u.porcentaje]), [['Escazú', 0.4], ['Curridabat', 0.4], ['Domicilio', 0.2]]);
-  igual(b.cats.aseguradoras, [{ nombre: 'Sana Sana', monto: 8500, montoPaciente: 16000, ubicaciones: ['Escazú'] }]);
+  igual(b.cats.aseguradoras, [{ nombre: 'Sana Sana', monto: 8500, montoPaciente: 16000, ubicaciones: ['Escazú'], exceptoTipos: SIN_SEGURO }]);
   igual(b.cats.descuentos, [{ nombre: 'VOLK', porcentaje: 0.1, ubicaciones: ['Domicilio'], exceptoTipos: ['Mediciones'] }]);
   assert.strictEqual(b.tarifas['Primera vez']['Curridabat'], 40000);
   assert.strictEqual(b.tarifas['Mediciones']['Curridabat'], false);
@@ -143,7 +145,7 @@ prueba('pareja: tarifa por persona y dos pagos', () => {
   assert.strictEqual(r.paciente2, 'Luis Mora');
 });
 
-prueba('Sana Sana: 16 000 paciente + 8 500 aseguradora, solo en Escazú', () => {
+prueba('Sana Sana: 16 000 paciente + 8 500 aseguradora, solo en Escazú y no en pareja ni Mediciones', () => {
   const ctx = nuevoEntorno();
   const base = { fecha: '2026-10-14', paciente: 'Pedro', tipo: 'Control', conSeguro: true, aseguradora: 'Sana Sana',
     montoAseguradora: 8500, pago1: 16000, forma1: 'SINPE' };
@@ -151,6 +153,11 @@ prueba('Sana Sana: 16 000 paciente + 8 500 aseguradora, solo en Escazú', () => 
   assert.strictEqual(r.totalFacturado, 24500);
   assert.strictEqual(r.estadoAseguradora, 'Pendiente');
   assert.throws(() => ctx.guardarRegistro(Object.assign({ ubicacion: 'Curridabat' }, base)), /solo aplica en Escazú/);
+  assert.throws(() => ctx.guardarRegistro(Object.assign({}, base, { ubicacion: 'Escazú', tipo: 'Mediciones' })),
+    /Sana Sana no aplica a Mediciones/);
+  assert.throws(() => ctx.guardarRegistro(Object.assign({}, base, { ubicacion: 'Escazú', tipo: 'Pareja control', paciente2: 'Y' })),
+    /Sana Sana no aplica a Pareja control/);
+  ctx.guardarRegistro(Object.assign({}, base, { ubicacion: 'Escazú', tipo: 'Primera vez' }));
 });
 
 prueba('Mediciones no se ofrece en Curridabat', () => {

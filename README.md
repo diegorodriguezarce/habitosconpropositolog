@@ -4,7 +4,7 @@ App web (Google Apps Script + Google Sheets) para que Moni registre cada consult
 
 - **Registrar**: formulario con autollenado. La tarifa sale de *ubicación × tipo de cita* (por persona en pareja), las citas del día salen de Google Calendar o iCal y el app sugiere *Primera vez / Control* según si el paciente ya vino. Los tipos que no se ofrecen en una ubicación (Mediciones en Curridabat) aparecen desactivados.
 - **Descuentos**: VOLK, 10 % en Domicilio y no aplica a Mediciones. Se configuran en la hoja *Descuentos*.
-- **Seguro**: solo aparece en las ubicaciones donde se acepta (Sana Sana en Escazú: ₡8 500 la aseguradora + ₡16 000 el paciente). Al marcar "Sí" aparecen la aseguradora, el total de la consulta con seguro, lo que paga la aseguradora (con monto fijo editable) y lo que paga el paciente, que se calcula solo. El estado del cobro es *Pendiente → Facturado → Pagado*.
+- **Seguro**: solo aparece en las ubicaciones donde se acepta (Sana Sana: solo en Escazú, no en citas de pareja ni Mediciones; ₡8 500 la aseguradora + ₡16 000 el paciente). Al marcar "Sí" aparecen la aseguradora, el total de la consulta con seguro, lo que paga la aseguradora (con monto fijo editable) y lo que paga el paciente, que se calcula solo. El estado del cobro es *Pendiente → Facturado → Pagado*.
 - **Pareja**: dos nombres y uno o dos pagos, cada uno con su forma de pago.
 - **Recientes**: los últimos 10 registros, editables o eliminables.
 - **Reportes**: totales del mes por ubicación con la parte de la sede y la de Moni (Escazú 40/60 con Andrea, Curridabat 40/60 con Raque, Domicilio 20/80 con Andrea), lo que se le paga a cada persona en total, por aseguradora, por tipo de cita y por forma de pago. Se exportan a una hoja nueva en Drive (general, liquidación por persona, por sede o cobro a aseguradora) y se descargan en PDF o Excel.
@@ -36,7 +36,7 @@ test/
 | **Registros** | La tabla única: una fila por atención. Se puede ordenar, filtrar o usar en tablas dinámicas y Looker Studio. Las columnas se buscan por nombre, así que se pueden agregar columnas propias. |
 | **Tarifas** | Matriz *tipo de cita × ubicación*. En pareja es el monto **por persona**. Celdas amarillas = sin tarifa (en la app se digita el monto). `No aplica` = ese tipo no se ofrece en esa ubicación. |
 | **Ubicaciones** | Encargado (a quién se le paga), **% que se le paga** y base de cálculo (*Total facturado* = paciente + aseguradora). El resto es de la nutricionista. Si una persona aparece en varias ubicaciones, los reportes suman lo que se le paga en total. |
-| **Aseguradoras** | Monto que paga la aseguradora, monto que paga el paciente y ubicaciones donde se acepta (ambos montos se pueden editar en cada registro). |
+| **Aseguradoras** | Monto que paga la aseguradora, monto que paga el paciente, ubicaciones donde se acepta y tipos de cita excluidos (ambos montos se pueden editar en cada registro). |
 | **Descuentos** | Nombre, %, ubicaciones donde aplica y tipos de cita excluidos. |
 | **Tipos de cita** | Lista de tipos; *Es pareja = Sí* activa el segundo nombre. |
 | **Formas de pago** | SINPE y Tarjeta. |
@@ -58,7 +58,7 @@ Para agregar una ubicación, aseguradora o tipo nuevo basta con escribirlo en su
 5. Vuelva a la hoja y revise los valores iniciales que ya vienen cargados:
    - **Tarifas**: Escazú, Curridabat y Domicilio para los 5 tipos de cita.
    - **Ubicaciones**: Andrea 40 % en Escazú y 20 % en Domicilio; Raque 40 % en Curridabat.
-   - **Aseguradoras**: Sana Sana, ₡8 500 + ₡16 000, solo en Escazú.
+   - **Aseguradoras**: Sana Sana, ₡8 500 + ₡16 000, solo en Escazú y excepto pareja y Mediciones.
    - **Descuentos**: VOLK 10 % en Domicilio, excepto Mediciones.
 6. Publique la app: **Implementar → Nueva implementación → ⚙️ Aplicación web**.
    - *Ejecutar como*: **Yo**

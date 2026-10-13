@@ -123,13 +123,14 @@ function setup() {
     sh.getRange(1, 4).setNote('"Total facturado" = paciente + aseguradora. "Pago paciente" = solo lo que paga el paciente.');
   });
 
-  crearCatalogo_(ss, HOJAS.aseguradoras, ['Aseguradora', 'Monto aseguradora', 'Monto paciente', 'Ubicaciones', 'Activa'], [
-    ['Sana Sana', 8500, 16000, 'Escazú', 'Sí'],
-  ], [160, 140, 130, 200, 70], function (sh) {
+  crearCatalogo_(ss, HOJAS.aseguradoras, ['Aseguradora', 'Monto aseguradora', 'Monto paciente', 'Ubicaciones', 'Excepto tipos', 'Activa'], [
+    ['Sana Sana', 8500, 16000, 'Escazú', 'Pareja primera vez, Pareja control, Mediciones', 'Sí'],
+  ], [160, 140, 130, 160, 300, 70], function (sh) {
     sh.getRange(2, 2, sh.getMaxRows() - 1, 2).setNumberFormat(MONEDA);
     sh.getRange(1, 2).setNote('Monto fijo que paga la aseguradora por consulta. En la app se puede editar.');
     sh.getRange(1, 3).setNote('Monto que se le cobra al paciente cuando usa este seguro. En la app se puede editar.');
     sh.getRange(1, 4).setNote('Ubicaciones donde se acepta, separadas por coma. Vacío = todas.');
+    sh.getRange(1, 5).setNote('Tipos de cita en los que NO se acepta, separados por coma.');
   }, { 'Monto por consulta': 'Monto aseguradora' });
 
   crearCatalogo_(ss, HOJAS.descuentos, ['Descuento', '% descuento', 'Ubicaciones', 'Excepto tipos', 'Activo'], [
@@ -637,6 +638,9 @@ function normalizarRegistro_(d, cats, tarifas) {
   if (conSeguro && aseg && !aplicaEn_(aseg.ubicaciones, ubicacion)) {
     throw new Error(aseguradora + ' solo aplica en ' + aseg.ubicaciones.join(', ') + '.');
   }
+  if (conSeguro && aseg && excluyeTipo_(aseg.exceptoTipos, tipo)) {
+    throw new Error(aseguradora + ' no aplica a ' + tipo + '.');
+  }
   const personas = pareja ? 2 : 1;
   const tarifa = typeof tarifaBase === 'number' ? tarifaBase * personas : '';
   const descuento = conSeguro ? '' : s(d.descuento);
@@ -819,6 +823,7 @@ function catalogos_() {
         monto: montoONull(r['Monto aseguradora'] !== undefined ? r['Monto aseguradora'] : r['Monto por consulta']),
         montoPaciente: montoONull(r['Monto paciente']),
         ubicaciones: listaConfig_(r['Ubicaciones']),
+        exceptoTipos: listaConfig_(r['Excepto tipos']),
       };
     });
   const descuentos = leerTabla_(HOJAS.descuentos)
@@ -847,10 +852,13 @@ function aplicaEn_(lista, ubicacion) {
   return lista.some(function (x) { return normTxt_(x) === u; });
 }
 
-function descuentoAplica_(desc, ubicacion, tipo) {
+function excluyeTipo_(lista, tipo) {
   const t = normTxt_(tipo);
-  return aplicaEn_(desc.ubicaciones, ubicacion) &&
-    !desc.exceptoTipos.some(function (x) { return normTxt_(x) === t; });
+  return (lista || []).some(function (x) { return normTxt_(x) === t; });
+}
+
+function descuentoAplica_(desc, ubicacion, tipo) {
+  return aplicaEn_(desc.ubicaciones, ubicacion) && !excluyeTipo_(desc.exceptoTipos, tipo);
 }
 
 /**

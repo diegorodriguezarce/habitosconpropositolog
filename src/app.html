@@ -105,11 +105,13 @@
     const t = tarifaActual();
     return typeof t === 'number' ? t * personas() : null;
   }
-  const aseguradorasAqui = () => S.cats.aseguradoras.filter((a) => aplicaEn(a.ubicaciones, getChip('ubicacion')));
+  const excluye = (lista, tipo) => (lista || []).some((x) => norm(x) === norm(tipo));
+  const aseguradorasAqui = () => S.cats.aseguradoras.filter((a) =>
+    aplicaEn(a.ubicaciones, getChip('ubicacion')) && !excluye(a.exceptoTipos, getChip('tipo')));
   function descuentosAqui() {
     const u = getChip('ubicacion');
     const t = norm(getChip('tipo'));
-    return S.cats.descuentos.filter((d) => aplicaEn(d.ubicaciones, u) && !d.exceptoTipos.some((x) => norm(x) === t));
+    return S.cats.descuentos.filter((d) => aplicaEn(d.ubicaciones, u) && !excluye(d.exceptoTipos, t));
   }
   function descuentoActual() {
     if (conSeguro()) return null;
