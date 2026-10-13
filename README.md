@@ -52,7 +52,7 @@ Para agregar una ubicación, aseguradora o tipo nuevo basta con escribirlo en su
    - Reemplace el contenido de `Código.gs` con el de `src/Code.gs`.
    - Cree tres archivos HTML (**+ → HTML**) llamados exactamente `index`, `styles` y `app`, y pegue en cada uno el contenido de `src/index.html`, `src/styles.html` y `src/app.html`.
    - En **Configuración del proyecto** (ícono ⚙️) active *"Mostrar el archivo de manifiesto appsscript.json"* y reemplace su contenido con `src/appsscript.json`.
-4. Arriba, elija la función **`setup`** y presione **Ejecutar**. Google pide permisos: acéptelos. Si sale *"Google no verificó esta app"*, entre a *Configuración avanzada → Ir a … (no seguro)*; es normal porque la app es suya. `setup` crea todas las hojas.
+4. Arriba, elija la función **`setup`** (debe ser la primera de la lista; si aparece `doGet`, cámbiela) y presione **Ejecutar**. También se puede correr desde la hoja con **Hábitos → Configurar / reparar hojas**. Google pide permisos: acéptelos. Si sale *"Google no verificó esta app"*, entre a *Configuración avanzada → Ir a … (no seguro)*; es normal porque la app es suya. `setup` crea todas las hojas.
 5. Vuelva a la hoja y complete:
    - **Tarifas**: los 15 montos.
    - **Ubicaciones**: % de comisión de Escazú (Andrea · DS) y de Curridabat.

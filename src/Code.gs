@@ -75,6 +75,186 @@ const COLUMNAS = [
   { key: 'modificado', header: 'Modificado', ancho: 130, formato: FECHA_HORA },
 ];
 
+/* ───────────────────────── Setup de la hoja ───────────────────────── */
+
+/**
+ * Crea las hojas que falten con encabezados, ejemplos y formato.
+ * Es seguro correrlo varias veces: no borra datos existentes.
+ */
+function setup() {
+  const ss = ss_();
+  ss.setSpreadsheetTimeZone(TZ);
+
+  crearCatalogo_(ss, HOJAS.tipos, ['Tipo de cita', 'Es pareja', 'Activo'], [
+    ['Primera vez', 'No', 'Sí'],
+    ['Control', 'No', 'Sí'],
+    ['Pareja primera vez', 'Sí', 'Sí'],
+    ['Pareja control', 'Sí', 'Sí'],
+    ['Mediciones', 'No', 'Sí'],
+  ], [180, 90, 70]);
+
+  crearCatalogo_(ss, HOJAS.ubicaciones, ['Ubicación', 'Encargado / a quién se paga', '% comisión', 'Base de comisión', 'Activa'], [
+    ['Escazú', 'Andrea (DS · Diseñando tu Salud)', '', 'Total facturado', 'Sí'],
+    ['Curridabat', 'Encargado Curridabat', '', 'Total facturado', 'Sí'],
+    ['Domicilio', '', 0, 'Total facturado', 'Sí'],
+  ], [130, 240, 100, 140, 70], function (sh) {
+    sh.getRange(2, 3, sh.getMaxRows() - 1, 1).setNumberFormat('0.##%');
+    sh.getRange(2, 4, sh.getMaxRows() - 1, 1).setDataValidation(
+      SpreadsheetApp.newDataValidation().requireValueInList(BASES_COMISION, true).build());
+    sh.getRange(1, 3).setNote('Porcentaje que se le paga a la sede sobre la base de comisión. Ej.: 20%.');
+    sh.getRange(1, 4).setNote('"Total facturado" = paciente + aseguradora. "Pago paciente" = solo lo que paga el paciente.');
+  });
+
+  crearCatalogo_(ss, HOJAS.aseguradoras, ['Aseguradora', 'Monto por consulta', 'Activa'], [
+    ['Sana Sana', '', 'Sí'],
+  ], [160, 140, 70], function (sh) {
+    sh.getRange(2, 2, sh.getMaxRows() - 1, 1).setNumberFormat(MONEDA);
+    sh.getRange(1, 2).setNote('Monto fijo que normalmente paga la aseguradora. En la app se puede editar en cada consulta.');
+  });
+
+  crearCatalogo_(ss, HOJAS.formas, ['Forma de pago', 'Activa'], [
+    ['Efectivo', 'Sí'],
+    ['SINPE', 'Sí'],
+    ['Tarjeta', 'Sí'],
+  ], [160, 70]);
+
+  const config = crearCatalogo_(ss, HOJAS.config, ['Clave', 'Valor', 'Descripción'], CONFIG_INICIAL, [200, 260, 420]);
+  asegurarClavesConfig_(config);
+
+  crearRegistros_(ss);
+  sincronizarTarifas();
+
+  // Orden de pestañas
+  [HOJAS.registros, HOJAS.tarifas, HOJAS.ubicaciones, HOJAS.aseguradoras, HOJAS.tipos, HOJAS.formas, HOJAS.config]
+    .forEach(function (n, i) {
+      const sh = ss.getSheetByName(n);
+      if (sh) { ss.setActiveSheet(sh); ss.moveActiveSheet(i + 1); }
+    });
+  ss.setActiveSheet(ss.getSheetByName(HOJAS.registros));
+
+  // Borrar la hoja vacía que trae un archivo nuevo
+  ['Hoja 1', 'Sheet1', 'Hoja1'].forEach(function (n) {
+    const sh = ss.getSheetByName(n);
+    if (sh && sh.getLastRow() === 0 && ss.getSheets().length > 1) ss.deleteSheet(sh);
+  });
+}
+
+function crearRegistros_(ss) {
+  let sh = ss.getSheetByName(HOJAS.registros);
+  if (!sh) sh = ss.insertSheet(HOJAS.registros);
+  const nCols = Math.max(sh.getLastColumn(), 1);
+  const actuales = sh.getRange(1, 1, 1, nCols).getValues()[0].map(function (h) { return String(h).trim(); });
+  const idx = indiceColumnas_(actuales);
+  const headers = actuales.filter(function (h) { return h; });
+  COLUMNAS.forEach(function (c) { if (idx[c.key] < 0) headers.push(c.header); });
+  sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+  estiloEncabezado_(sh, headers.length);
+
+  const fin = indiceColumnas_(headers);
+  const filas = sh.getMaxRows() - 1;
+  COLUMNAS.forEach(function (c) {
+    const col = fin[c.key] + 1;
+    sh.setColumnWidth(col, c.ancho);
+    sh.getRange(2, col, filas, 1).setNumberFormat(c.formato);
+  });
+  sh.setFrozenColumns(Math.max(fin.paciente + 1, 0));
+
+  // Listas desplegables (aceptan valores fuera de la lista, solo avisan)
+  const lista = function (hoja) {
+    const h = ss.getSheetByName(hoja);
+    return SpreadsheetApp.newDataValidation().requireValueInRange(h.getRange(2, 1, h.getMaxRows() - 1, 1), true)
+      .setAllowInvalid(true).build();
+  };
+  const opciones = function (arr) {
+    return SpreadsheetApp.newDataValidation().requireValueInList(arr, true).setAllowInvalid(true).build();
+  };
+  const validar = function (key, regla) { if (fin[key] >= 0) sh.getRange(2, fin[key] + 1, filas, 1).setDataValidation(regla); };
+  validar('tipo', lista(HOJAS.tipos));
+  validar('ubicacion', lista(HOJAS.ubicaciones));
+  validar('aseguradora', lista(HOJAS.aseguradoras));
+  validar('forma1', lista(HOJAS.formas));
+  validar('forma2', lista(HOJAS.formas));
+  validar('conSeguro', opciones(['Sí', 'No']));
+  validar('estadoAseguradora', opciones(ESTADOS_ASEGURADORA));
+
+  try {
+    if (!sh.getBandings().length) {
+      sh.getRange(1, 1, sh.getMaxRows(), headers.length)
+        .applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREEN, true, false)
+        .setHeaderRowColor(COLOR.oscuro).setFirstRowColor('#FFFFFF').setSecondRowColor(COLOR.crema2);
+    }
+  } catch (e) { /* el banding es solo estético */ }
+  return sh;
+}
+
+function crearCatalogo_(ss, nombre, headers, ejemplo, anchos, extra) {
+  let sh = ss.getSheetByName(nombre);
+  const nueva = !sh;
+  if (nueva) sh = ss.insertSheet(nombre);
+  if (sh.getLastRow() === 0) {
+    sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+    if (ejemplo.length) sh.getRange(2, 1, ejemplo.length, headers.length).setValues(ejemplo);
+  }
+  estiloEncabezado_(sh, headers.length);
+  anchos.forEach(function (a, i) { sh.setColumnWidth(i + 1, a); });
+  if (extra) extra(sh);
+  return sh;
+}
+
+/** Agrega a Config las claves nuevas que no existan (sin tocar valores). */
+function asegurarClavesConfig_(sh) {
+  const n = sh.getLastRow();
+  const claves = n >= 2 ? sh.getRange(2, 1, n - 1, 1).getValues().map(function (r) { return String(r[0]).trim(); }) : [];
+  const faltan = CONFIG_INICIAL.filter(function (f) { return claves.indexOf(f[0]) < 0; });
+  if (faltan.length) sh.getRange(n + 1, 1, faltan.length, 3).setValues(faltan);
+}
+
+/** Ajusta la hoja Tarifas a los tipos y ubicaciones activos, sin perder montos. */
+function sincronizarTarifas() {
+  const ss = ss_();
+  const cats = catalogos_();
+  let sh = ss.getSheetByName(HOJAS.tarifas);
+  if (!sh) sh = ss.insertSheet(HOJAS.tarifas);
+
+  let v = sh.getLastRow() ? sh.getRange(1, 1, sh.getLastRow(), Math.max(sh.getLastColumn(), 1)).getValues() : [['Tipo de cita']];
+  v = v.map(function (r) { return r.slice(); });
+  v[0][0] = 'Tipo de cita';
+  const cols = v[0].map(function (h) { return String(h).trim(); });
+  cats.ubicaciones.forEach(function (u) {
+    if (cols.indexOf(u.nombre) < 0) {
+      cols.push(u.nombre);
+      v.forEach(function (r, i) { r.push(i === 0 ? u.nombre : ''); });
+    }
+  });
+  const tipos = v.slice(1).map(function (r) { return String(r[0]).trim(); });
+  cats.tipos.forEach(function (t) {
+    if (tipos.indexOf(t.nombre) < 0) v.push([t.nombre].concat(cols.slice(1).map(function () { return ''; })));
+  });
+
+  sh.getRange(1, 1, v.length, cols.length).setValues(v);
+  estiloEncabezado_(sh, cols.length);
+  sh.setFrozenColumns(1);
+  sh.setColumnWidth(1, 180);
+  for (let c = 2; c <= cols.length; c++) sh.setColumnWidth(c, 120);
+  if (v.length > 1 && cols.length > 1) {
+    const datos = sh.getRange(2, 2, v.length - 1, cols.length - 1);
+    datos.setNumberFormat(MONEDA);
+    sh.setConditionalFormatRules([
+      SpreadsheetApp.newConditionalFormatRule().whenCellEmpty().setBackground(COLOR.amarilloSuave).setRanges([datos]).build(),
+    ]);
+  }
+  sh.getRange(1, 1).setNote('Monto total de la cita por tipo y ubicación. En citas de pareja es el monto por ambas personas. ' +
+    'Celdas amarillas = sin tarifa (en la app se digita el monto).');
+}
+
+function estiloEncabezado_(sh, n) {
+  sh.getRange(1, 1, 1, n)
+    .setBackground(COLOR.oscuro).setFontColor(COLOR.crema).setFontWeight('bold')
+    .setFontFamily('Montserrat').setVerticalAlignment('middle');
+  sh.setFrozenRows(1);
+  sh.setRowHeight(1, 30);
+}
+
 /* ───────────────────────────── Web app ───────────────────────────── */
 
 function doGet() {
@@ -1086,186 +1266,6 @@ function urlExport_(id, gid, formato) {
   if (formato !== 'pdf') return base;
   return base + '&size=letter&portrait=true&fitw=true&gridlines=false&printtitle=false' +
     '&sheetnames=false&pagenum=UNDEFINED&top_margin=0.6&bottom_margin=0.6&left_margin=0.6&right_margin=0.6';
-}
-
-/* ───────────────────────── Setup de la hoja ───────────────────────── */
-
-/**
- * Crea las hojas que falten con encabezados, ejemplos y formato.
- * Es seguro correrlo varias veces: no borra datos existentes.
- */
-function setup() {
-  const ss = ss_();
-  ss.setSpreadsheetTimeZone(TZ);
-
-  crearCatalogo_(ss, HOJAS.tipos, ['Tipo de cita', 'Es pareja', 'Activo'], [
-    ['Primera vez', 'No', 'Sí'],
-    ['Control', 'No', 'Sí'],
-    ['Pareja primera vez', 'Sí', 'Sí'],
-    ['Pareja control', 'Sí', 'Sí'],
-    ['Mediciones', 'No', 'Sí'],
-  ], [180, 90, 70]);
-
-  crearCatalogo_(ss, HOJAS.ubicaciones, ['Ubicación', 'Encargado / a quién se paga', '% comisión', 'Base de comisión', 'Activa'], [
-    ['Escazú', 'Andrea (DS · Diseñando tu Salud)', '', 'Total facturado', 'Sí'],
-    ['Curridabat', 'Encargado Curridabat', '', 'Total facturado', 'Sí'],
-    ['Domicilio', '', 0, 'Total facturado', 'Sí'],
-  ], [130, 240, 100, 140, 70], function (sh) {
-    sh.getRange(2, 3, sh.getMaxRows() - 1, 1).setNumberFormat('0.##%');
-    sh.getRange(2, 4, sh.getMaxRows() - 1, 1).setDataValidation(
-      SpreadsheetApp.newDataValidation().requireValueInList(BASES_COMISION, true).build());
-    sh.getRange(1, 3).setNote('Porcentaje que se le paga a la sede sobre la base de comisión. Ej.: 20%.');
-    sh.getRange(1, 4).setNote('"Total facturado" = paciente + aseguradora. "Pago paciente" = solo lo que paga el paciente.');
-  });
-
-  crearCatalogo_(ss, HOJAS.aseguradoras, ['Aseguradora', 'Monto por consulta', 'Activa'], [
-    ['Sana Sana', '', 'Sí'],
-  ], [160, 140, 70], function (sh) {
-    sh.getRange(2, 2, sh.getMaxRows() - 1, 1).setNumberFormat(MONEDA);
-    sh.getRange(1, 2).setNote('Monto fijo que normalmente paga la aseguradora. En la app se puede editar en cada consulta.');
-  });
-
-  crearCatalogo_(ss, HOJAS.formas, ['Forma de pago', 'Activa'], [
-    ['Efectivo', 'Sí'],
-    ['SINPE', 'Sí'],
-    ['Tarjeta', 'Sí'],
-  ], [160, 70]);
-
-  const config = crearCatalogo_(ss, HOJAS.config, ['Clave', 'Valor', 'Descripción'], CONFIG_INICIAL, [200, 260, 420]);
-  asegurarClavesConfig_(config);
-
-  crearRegistros_(ss);
-  sincronizarTarifas();
-
-  // Orden de pestañas
-  [HOJAS.registros, HOJAS.tarifas, HOJAS.ubicaciones, HOJAS.aseguradoras, HOJAS.tipos, HOJAS.formas, HOJAS.config]
-    .forEach(function (n, i) {
-      const sh = ss.getSheetByName(n);
-      if (sh) { ss.setActiveSheet(sh); ss.moveActiveSheet(i + 1); }
-    });
-  ss.setActiveSheet(ss.getSheetByName(HOJAS.registros));
-
-  // Borrar la hoja vacía que trae un archivo nuevo
-  ['Hoja 1', 'Sheet1', 'Hoja1'].forEach(function (n) {
-    const sh = ss.getSheetByName(n);
-    if (sh && sh.getLastRow() === 0 && ss.getSheets().length > 1) ss.deleteSheet(sh);
-  });
-}
-
-function crearRegistros_(ss) {
-  let sh = ss.getSheetByName(HOJAS.registros);
-  if (!sh) sh = ss.insertSheet(HOJAS.registros);
-  const nCols = Math.max(sh.getLastColumn(), 1);
-  const actuales = sh.getRange(1, 1, 1, nCols).getValues()[0].map(function (h) { return String(h).trim(); });
-  const idx = indiceColumnas_(actuales);
-  const headers = actuales.filter(function (h) { return h; });
-  COLUMNAS.forEach(function (c) { if (idx[c.key] < 0) headers.push(c.header); });
-  sh.getRange(1, 1, 1, headers.length).setValues([headers]);
-  estiloEncabezado_(sh, headers.length);
-
-  const fin = indiceColumnas_(headers);
-  const filas = sh.getMaxRows() - 1;
-  COLUMNAS.forEach(function (c) {
-    const col = fin[c.key] + 1;
-    sh.setColumnWidth(col, c.ancho);
-    sh.getRange(2, col, filas, 1).setNumberFormat(c.formato);
-  });
-  sh.setFrozenColumns(Math.max(fin.paciente + 1, 0));
-
-  // Listas desplegables (aceptan valores fuera de la lista, solo avisan)
-  const lista = function (hoja) {
-    const h = ss.getSheetByName(hoja);
-    return SpreadsheetApp.newDataValidation().requireValueInRange(h.getRange(2, 1, h.getMaxRows() - 1, 1), true)
-      .setAllowInvalid(true).build();
-  };
-  const opciones = function (arr) {
-    return SpreadsheetApp.newDataValidation().requireValueInList(arr, true).setAllowInvalid(true).build();
-  };
-  const validar = function (key, regla) { if (fin[key] >= 0) sh.getRange(2, fin[key] + 1, filas, 1).setDataValidation(regla); };
-  validar('tipo', lista(HOJAS.tipos));
-  validar('ubicacion', lista(HOJAS.ubicaciones));
-  validar('aseguradora', lista(HOJAS.aseguradoras));
-  validar('forma1', lista(HOJAS.formas));
-  validar('forma2', lista(HOJAS.formas));
-  validar('conSeguro', opciones(['Sí', 'No']));
-  validar('estadoAseguradora', opciones(ESTADOS_ASEGURADORA));
-
-  try {
-    if (!sh.getBandings().length) {
-      sh.getRange(1, 1, sh.getMaxRows(), headers.length)
-        .applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREEN, true, false)
-        .setHeaderRowColor(COLOR.oscuro).setFirstRowColor('#FFFFFF').setSecondRowColor(COLOR.crema2);
-    }
-  } catch (e) { /* el banding es solo estético */ }
-  return sh;
-}
-
-function crearCatalogo_(ss, nombre, headers, ejemplo, anchos, extra) {
-  let sh = ss.getSheetByName(nombre);
-  const nueva = !sh;
-  if (nueva) sh = ss.insertSheet(nombre);
-  if (sh.getLastRow() === 0) {
-    sh.getRange(1, 1, 1, headers.length).setValues([headers]);
-    if (ejemplo.length) sh.getRange(2, 1, ejemplo.length, headers.length).setValues(ejemplo);
-  }
-  estiloEncabezado_(sh, headers.length);
-  anchos.forEach(function (a, i) { sh.setColumnWidth(i + 1, a); });
-  if (extra) extra(sh);
-  return sh;
-}
-
-/** Agrega a Config las claves nuevas que no existan (sin tocar valores). */
-function asegurarClavesConfig_(sh) {
-  const n = sh.getLastRow();
-  const claves = n >= 2 ? sh.getRange(2, 1, n - 1, 1).getValues().map(function (r) { return String(r[0]).trim(); }) : [];
-  const faltan = CONFIG_INICIAL.filter(function (f) { return claves.indexOf(f[0]) < 0; });
-  if (faltan.length) sh.getRange(n + 1, 1, faltan.length, 3).setValues(faltan);
-}
-
-/** Ajusta la hoja Tarifas a los tipos y ubicaciones activos, sin perder montos. */
-function sincronizarTarifas() {
-  const ss = ss_();
-  const cats = catalogos_();
-  let sh = ss.getSheetByName(HOJAS.tarifas);
-  if (!sh) sh = ss.insertSheet(HOJAS.tarifas);
-
-  let v = sh.getLastRow() ? sh.getRange(1, 1, sh.getLastRow(), Math.max(sh.getLastColumn(), 1)).getValues() : [['Tipo de cita']];
-  v = v.map(function (r) { return r.slice(); });
-  v[0][0] = 'Tipo de cita';
-  const cols = v[0].map(function (h) { return String(h).trim(); });
-  cats.ubicaciones.forEach(function (u) {
-    if (cols.indexOf(u.nombre) < 0) {
-      cols.push(u.nombre);
-      v.forEach(function (r, i) { r.push(i === 0 ? u.nombre : ''); });
-    }
-  });
-  const tipos = v.slice(1).map(function (r) { return String(r[0]).trim(); });
-  cats.tipos.forEach(function (t) {
-    if (tipos.indexOf(t.nombre) < 0) v.push([t.nombre].concat(cols.slice(1).map(function () { return ''; })));
-  });
-
-  sh.getRange(1, 1, v.length, cols.length).setValues(v);
-  estiloEncabezado_(sh, cols.length);
-  sh.setFrozenColumns(1);
-  sh.setColumnWidth(1, 180);
-  for (let c = 2; c <= cols.length; c++) sh.setColumnWidth(c, 120);
-  if (v.length > 1 && cols.length > 1) {
-    const datos = sh.getRange(2, 2, v.length - 1, cols.length - 1);
-    datos.setNumberFormat(MONEDA);
-    sh.setConditionalFormatRules([
-      SpreadsheetApp.newConditionalFormatRule().whenCellEmpty().setBackground(COLOR.amarilloSuave).setRanges([datos]).build(),
-    ]);
-  }
-  sh.getRange(1, 1).setNote('Monto total de la cita por tipo y ubicación. En citas de pareja es el monto por ambas personas. ' +
-    'Celdas amarillas = sin tarifa (en la app se digita el monto).');
-}
-
-function estiloEncabezado_(sh, n) {
-  sh.getRange(1, 1, 1, n)
-    .setBackground(COLOR.oscuro).setFontColor(COLOR.crema).setFontWeight('bold')
-    .setFontFamily('Montserrat').setVerticalAlignment('middle');
-  sh.setFrozenRows(1);
-  sh.setRowHeight(1, 30);
 }
 
 /* ───────────────────────── Menú ───────────────────────── */
