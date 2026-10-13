@@ -89,6 +89,28 @@ En la hoja **Config**:
 
 El app intenta sacar del título del evento el nombre, el tipo y la ubicación, por ejemplo *"María Pérez – Control Escazú"* o *"Ana y Luis · Pareja primera vez"*. Siempre se puede corregir antes de guardar. Las citas ya registradas aparecen con ✓.
 
+## Importar registros anteriores (bitácora en Excel)
+
+`tools/importar_bitacora.py` convierte la bitácora vieja (bloques por mes y sede: DS = Escazú, Domicilio, Curridabat) al formato de Registros:
+
+```bash
+pip install openpyxl
+python3 tools/importar_bitacora.py "Bitácora HCP 2026.xlsx" salida/
+```
+
+Genera dos archivos:
+
+- `importar.xlsx`: una pestaña **Importar** con las consultas *Confirmadas*. Las parejas se unen en un registro, Datáfono pasa a Tarjeta, VOLK pasa a descuento y la columna SANA SANA pasa a seguro.
+- `revision.xlsx`: la pestaña **Revisar** (canceladas, por reprogramar, pendientes y avisos) y la pestaña **Cuadre** (totales por mes y sede comparados con el Excel).
+
+Para cargarlos en la hoja de la app:
+
+1. **Archivo → Importar → Subir** `importar.xlsx` → *Insertar hojas nuevas*.
+2. Menú **Hábitos → Importar registros**. Las filas pasan a *Registros* según el nombre de cada columna. Si se corre dos veces no duplica, porque los IDs repetidos se omiten.
+3. Borre la pestaña *Importar*.
+
+> Los archivos con datos de pacientes (`*.xlsx`, `*.csv`) están en `.gitignore`: nunca se suben al repositorio.
+
 ## Pasar de la cuenta de prueba a la cuenta de Hábitos
 
 **Opción A (recomendada):** copiar la hoja completa.

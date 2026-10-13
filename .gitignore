@@ -2,3 +2,7 @@ node_modules/
 dev/preview.html
 .clasp.json
 .clasprc.json
+# Datos de pacientes: nunca al repositorio
+*.xlsx
+*.xls
+*.csv

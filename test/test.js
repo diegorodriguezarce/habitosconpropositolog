@@ -285,6 +285,33 @@ prueba('exportar reportes: general, sede, colaboradora y aseguradora', () => {
   assert.ok(!texto(4).includes('"C"'), 'sin nombres de pacientes');
 });
 
+prueba('importar registros desde la pestaña Importar: por nombre de columna y sin duplicar', () => {
+  const ctx = nuevoEntorno();
+  // Registros con columnas en otro orden (como una hoja creada con una versión anterior)
+  const reg = hoja(ctx, 'Registros');
+  const cab = reg.getRange(1, 1, 1, reg.getLastColumn()).getValues()[0];
+  const movidas = cab.filter((h) => h !== 'Descuento' && h !== 'Monto descuento').concat(['Descuento', 'Monto descuento']);
+  reg.getRange(1, 1, 1, movidas.length).setValues([movidas]);
+
+  const imp = ctx._libro.insertSheet('Importar');
+  imp.getRange(1, 1, 3, 9).setValues([
+    ['ID', 'Fecha', 'Paciente', 'Tipo de cita', 'Ubicación', 'Descuento', 'Pago 1', 'Forma de pago 1', 'Con seguro'],
+    ['H0001', new Date(2026, 8, 7), 'Carlos', 'Primera vez', 'Domicilio', 'VOLK', 31500, 'Tarjeta', 'No'],
+    ['H0002', '2026-09-26', 'Paula', 'Control', 'Escazú', '', 35000, 'SINPE', 'No'],
+  ]);
+  const r1 = ctx.importarDesdeHoja_('Importar');
+  assert.strictEqual(r1.importados, 2);
+  const regs = ctx.getRecientes(10);
+  const carlos = regs.find((r) => r.id === 'H0001');
+  igual([carlos.fecha, carlos.descuento, carlos.pago1, carlos.forma1, carlos.ubicacion], ['2026-09-07', 'VOLK', 31500, 'Tarjeta', 'Domicilio']);
+  assert.strictEqual(regs.find((r) => r.id === 'H0002').fecha, '2026-09-26');
+  assert.strictEqual(reg.getRange(2, movidas.indexOf('Descuento') + 1).getValue(), 'VOLK');
+
+  const r2 = ctx.importarDesdeHoja_('Importar');
+  igual([r2.importados, r2.repetidos], [0, 2]);
+  assert.strictEqual(ctx.getReporteMes('2026-09').totales.facturado, 66500);
+});
+
 prueba('eventos de Google: sugerencias de paciente, tipo y ubicación', () => {
   const ctx = nuevoEntorno();
   const { eventos, error } = ctx.getEventos('2026-10-13');

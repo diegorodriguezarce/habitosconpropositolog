@@ -343,6 +343,7 @@ function onOpen() {
     .addSeparator()
     .addItem('Configurar / reparar hojas', 'setup')
     .addItem('Sincronizar tarifas con catálogos', 'sincronizarTarifas')
+    .addItem('Importar registros (pestaña "Importar")', 'importarRegistros')
     .addSeparator()
     .addItem('Borrar todos los registros (datos de prueba)', 'limpiarRegistros')
     .addToUi();
@@ -1498,6 +1499,65 @@ function abrirApp() {
     '<a href="' + url + '" target="_blank" style="color:#304323;font-weight:bold">Abrir la bitácora →</a></p>')
     .setWidth(320).setHeight(90);
   ui.showModalDialog(html, 'Hábitos con propósito');
+}
+
+/** Menú: copia a Registros las filas de la pestaña "Importar" (por nombre de columna, sin duplicar IDs). */
+function importarRegistros() {
+  const ui = SpreadsheetApp.getUi();
+  try {
+    const r = importarDesdeHoja_('Importar');
+    ui.alert('Importación', r.importados + ' registro(s) importados' +
+      (r.repetidos ? ', ' + r.repetidos + ' ya existían y se omitieron' : '') +
+      '.\n\nYa puede borrar la pestaña "Importar".', ui.ButtonSet.OK);
+  } catch (e) {
+    ui.alert('Importación', e.message, ui.ButtonSet.OK);
+  }
+}
+
+function importarDesdeHoja_(nombre) {
+  const src = ss_().getSheetByName(nombre);
+  if (!src || src.getLastRow() < 2) throw new Error('No hay una pestaña "' + nombre + '" con datos.');
+  const v = src.getRange(1, 1, src.getLastRow(), src.getLastColumn()).getValues();
+  const de = indiceColumnas_(v[0]);
+  if (de.fecha < 0 || de.paciente < 0) throw new Error('La pestaña "' + nombre + '" debe tener las columnas Fecha y Paciente.');
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const sh = hoja_(HOJAS.registros);
+    const nCols = sh.getLastColumn();
+    const idx = indiceColumnas_(sh.getRange(1, 1, 1, nCols).getValues()[0]);
+    const existentes = {};
+    leerRegistros_().forEach(function (x) { existentes[x.reg.id] = true; });
+
+    const filas = [];
+    let repetidos = 0;
+    v.slice(1).forEach(function (fila) {
+      if (!fila.some(function (x) { return x !== '' && x != null; })) return;
+      const id = de.id >= 0 ? String(fila[de.id]).trim() : '';
+      if (id && existentes[id]) { repetidos++; return; }
+      const out = [];
+      for (let i = 0; i < nCols; i++) out.push('');
+      COLUMNAS.forEach(function (c) {
+        if (idx[c.key] >= 0 && de[c.key] >= 0) out[idx[c.key]] = fila[de[c.key]];
+      });
+      if (idx.id >= 0) out[idx.id] = id || Utilities.getUuid().slice(0, 8);
+      out[idx.fecha] = aFecha_(fechaStr_(fila[de.fecha])) || fila[de.fecha];
+      if (idx.hora >= 0) out[idx.hora] = de.hora >= 0 ? horaStr_(fila[de.hora]) : '';
+      existentes[out[idx.id]] = true;
+      filas.push(out);
+    });
+    if (filas.length) {
+      const inicio = sh.getLastRow() + 1;
+      const formatos = formatosFila_(sh, inicio, nCols, idx);
+      sh.getRange(inicio, 1, filas.length, nCols)
+        .setNumberFormats(filas.map(function () { return formatos; }))
+        .setValues(filas);
+    }
+    return { importados: filas.length, repetidos: repetidos };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function limpiarRegistros() {
