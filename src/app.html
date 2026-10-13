@@ -523,8 +523,8 @@
     $('#repEtiqueta').textContent = r.etiqueta;
     $('#kpis').innerHTML = [
       ['Total facturado', colones(t.facturado), t.consultas + ' consultas · ' + t.personas + ' personas', true],
-      ['Para ' + S.nutri, colones(t.neto), 'después de pagar a colaboradoras'],
-      ['Pagos a colaboradoras', colones(t.comisiones), t.descuentos ? 'Descuentos dados: ' + colones(t.descuentos) : 'según % de cada sede'],
+      ['Para ' + S.nutri, colones(t.neto), 'después de pagar comisiones'],
+      ['Comisiones', colones(t.comisiones), t.descuentos ? 'Descuentos dados: ' + colones(t.descuentos) : 'según % de cada sede'],
       ['Por cobrar a aseguradoras', colones(t.porCobrar), 'pendiente + facturado'],
     ].map((k) => '<div class="kpi' + (k[3] ? ' destacado' : '') + '"><div class="kpi-label">' + k[0] + '</div><div class="kpi-valor">' + k[1] + '</div><div class="kpi-sub">' + esc(k[2]) + '</div></div>').join('');
 
@@ -536,11 +536,7 @@
         colones(u.comision) + '<span class="sub">' + pct(u.porcentaje) + '</span>',
         colones(u.nutricionista) + '<span class="sub">' + pct(1 - u.porcentaje) + '</span>',
       ]),
-      ['Total', t.consultas, colones(t.facturado), colones(t.comisiones), colones(t.neto)]) +
-      (r.encargados.length ? '<div class="colab"><h3>A pagar por persona</h3>' + tabla(
-        [{ t: 'Persona' }, { t: 'Consultas', num: 1 }, { t: 'A pagar', num: 1 }],
-        r.encargados.map((e) => [esc(e.nombre) + '<span class="sub">' + esc(e.ubicaciones.join(' + ')) + '</span>', e.consultas, colones(e.comision)])) +
-      '</div>' : '');
+      ['Total', t.consultas, colones(t.facturado), colones(t.comisiones), colones(t.neto)]);
 
     $('#tablaAseg').innerHTML = tabla(
       [{ t: 'Aseguradora' }, { t: 'Consultas', num: 1 }, { t: 'Pendiente', num: 1 }, { t: 'Facturado', num: 1 }, { t: 'Pagado', num: 1 }],

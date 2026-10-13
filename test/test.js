@@ -61,9 +61,9 @@ prueba('setup crea las hojas con tarifas, comisiones, seguro y descuento inicial
   assert.strictEqual(hoja(ctx, 'Config').getLastRow(), 6, 'Config no debe duplicar claves');
   igual(hoja(ctx, 'Formas de pago').getRange(2, 1, 2, 1).getValues(), [['SINPE'], ['Tarjeta']]);
   igual(hoja(ctx, 'Ubicaciones').getRange(2, 1, 3, 3).getValues(), [
-    ['Escazú', 'Andrea (DS · Diseñando tu Salud)', 0.4],
-    ['Curridabat', 'Raque', 0.4],
-    ['Domicilio', 'Andrea (DS · Diseñando tu Salud)', 0.2],
+    ['Escazú', 'Andrea R.', 0.4],
+    ['Curridabat', 'Raquel D.', 0.4],
+    ['Domicilio', 'Andrea R.', 0.2],
   ]);
 });
 
@@ -251,8 +251,8 @@ prueba('reporte del mes: parte de cada sede, de Moni y por colaboradora', () => 
   assert.strictEqual(t.comisiones, 50800);
   assert.strictEqual(t.neto, 98700);
   igual(r.encargados.map((e) => [e.nombre, e.ubicaciones, e.consultas, e.comision]), [
-    ['Andrea (DS · Diseñando tu Salud)', ['Escazú', 'Domicilio'], 3, 38800],
-    ['Raque', ['Curridabat'], 1, 12000],
+    ['Andrea R.', ['Escazú', 'Domicilio'], 3, 38800],
+    ['Raquel D.', ['Curridabat'], 1, 12000],
   ]);
   igual(r.formas.map((f) => [f.nombre, f.monto]), [['SINPE', 88500], ['Tarjeta', 52500]]);
 
@@ -277,9 +277,9 @@ prueba('exportar reportes: general, sede, colaboradora y aseguradora', () => {
     return JSON.stringify(sh.getRange(1, 1, sh.getLastRow(), 8).getValues());
   };
   const casos = [
-    [{ tipo: 'general' }, ['Monto para Moni', '98700', 'Pagos a colaboradoras', '38800']],
-    [{ tipo: 'sede', filtro: 'Curridabat' }, ['Monto a pagar a Raque', '12000', 'Monto para Moni', '18000']],
-    [{ tipo: 'encargado', filtro: 'Andrea (DS · Diseñando tu Salud)' }, ['Total a pagar a Andrea', '38800', '"Domicilio"', '(VOLK)']],
+    [{ tipo: 'general' }, ['Monto para Moni', '98700', '"Comisiones",50800']],
+    [{ tipo: 'sede', filtro: 'Curridabat' }, ['Monto a pagar a Raquel D.', '12000', 'Monto para Moni', '18000']],
+    [{ tipo: 'encargado', filtro: 'Andrea R.' }, ['Total a pagar a Andrea R.', '38800', '"Domicilio"', '(VOLK)']],
     [{ tipo: 'aseguradora', filtro: 'Sana Sana' }, ['"B"', '8500', 'Total a cobrar a Sana Sana']],
   ];
   casos.forEach(([opc, esperado], i) => {
@@ -289,7 +289,7 @@ prueba('exportar reportes: general, sede, colaboradora y aseguradora', () => {
     assert.ok(tx.includes('Hábitos con propósito'));
     esperado.forEach((e) => assert.ok(tx.includes(e), opc.tipo + ': falta ' + e + '\n' + tx));
   });
-  assert.ok(ctx.exportarReporte({ tipo: 'encargado', filtro: 'Raque', mes: '2026-10', nombres: false }).nombre.includes('Liquidación Raque'));
+  assert.ok(ctx.exportarReporte({ tipo: 'encargado', filtro: 'Raquel D.', mes: '2026-10', nombres: false }).nombre.includes('Liquidación Raquel D.'));
   assert.ok(!texto(4).includes('"C"'), 'sin nombres de pacientes');
 });
 

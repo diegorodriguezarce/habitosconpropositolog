@@ -7,7 +7,7 @@ App web (Google Apps Script + Google Sheets) para que Moni registre cada consult
 - **Seguro**: solo aparece en las ubicaciones donde se acepta (Sana Sana: solo en Escazú, no en citas de pareja ni Mediciones; ₡8 500 la aseguradora + ₡16 000 el paciente). Al marcar "Sí" aparecen la aseguradora, el total de la consulta con seguro, lo que paga la aseguradora (con monto fijo editable) y lo que paga el paciente, que se calcula solo. El estado del cobro es *Pendiente → Facturado → Pagado*.
 - **Pareja**: dos nombres y uno o dos pagos, cada uno con su forma de pago.
 - **Recientes**: los últimos 10 registros, editables o eliminables.
-- **Reportes**: totales del mes por ubicación con la parte de la sede y la de Moni (Escazú 40/60 con Andrea, Curridabat 40/60 con Raque, Domicilio 20/80 con Andrea), lo que se le paga a cada persona en total, por aseguradora, por tipo de cita y por forma de pago. Se exportan a una hoja nueva en Drive (general, liquidación por persona, por sede o cobro a aseguradora) y se descargan en PDF o Excel.
+- **Reportes**: totales del mes por ubicación con la parte de la sede y la de Moni (Escazú 40/60 con Andrea R., Curridabat 40/60 con Raquel D., Domicilio 20/80 con Andrea R.), por aseguradora, por tipo de cita y por forma de pago. Se exportan a una hoja nueva en Drive (general, liquidación por persona, por sede o cobro a aseguradora) y se descargan en PDF o Excel.
 
 Solo la usa la administradora: la app corre con su cuenta y nadie más tiene acceso.
 
@@ -57,7 +57,7 @@ Para agregar una ubicación, aseguradora o tipo nuevo basta con escribirlo en su
 4. Arriba, elija la función **`setup`** (debe ser la primera de la lista; si aparece `doGet`, cámbiela) y presione **Ejecutar**. También se puede correr desde la hoja con **Hábitos → Configurar / reparar hojas**. Google pide permisos: acéptelos. Si sale *"Google no verificó esta app"*, entre a *Configuración avanzada → Ir a … (no seguro)*; es normal porque la app es suya. `setup` crea todas las hojas.
 5. Vuelva a la hoja y revise los valores iniciales que ya vienen cargados:
    - **Tarifas**: Escazú, Curridabat y Domicilio para los 5 tipos de cita.
-   - **Ubicaciones**: Andrea 40 % en Escazú y 20 % en Domicilio; Raque 40 % en Curridabat.
+   - **Ubicaciones**: Andrea R. 40 % en Escazú y 20 % en Domicilio; Raquel D. 40 % en Curridabat.
    - **Aseguradoras**: Sana Sana, ₡8 500 + ₡16 000, solo en Escazú y excepto pareja y Mediciones.
    - **Descuentos**: VOLK 10 % en Domicilio, excepto Mediciones.
 6. Publique la app: **Implementar → Nueva implementación → ⚙️ Aplicación web**.

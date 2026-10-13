@@ -112,9 +112,9 @@ function setup() {
   });
 
   crearCatalogo_(ss, HOJAS.ubicaciones, ['Ubicación', 'Encargado / a quién se paga', '% comisión', 'Base de comisión', 'Activa'], [
-    ['Escazú', 'Andrea (DS · Diseñando tu Salud)', 0.4, 'Total facturado', 'Sí'],
-    ['Curridabat', 'Raque', 0.4, 'Total facturado', 'Sí'],
-    ['Domicilio', 'Andrea (DS · Diseñando tu Salud)', 0.2, 'Total facturado', 'Sí'],
+    ['Escazú', 'Andrea R.', 0.4, 'Total facturado', 'Sí'],
+    ['Curridabat', 'Raquel D.', 0.4, 'Total facturado', 'Sí'],
+    ['Domicilio', 'Andrea R.', 0.2, 'Total facturado', 'Sí'],
   ], [130, 240, 100, 140, 70], function (sh) {
     sh.getRange(2, 3, sh.getMaxRows() - 1, 1).setNumberFormat('0.##%');
     sh.getRange(2, 4, sh.getMaxRows() - 1, 1).setDataValidation(
@@ -1361,7 +1361,7 @@ function reporteGeneral_(w, regs, cats) {
     ['Monto aseguradoras', t.aseguradoras, MONEDA],
     ['Total facturado', t.facturado, MONEDA],
     ['Descuentos aplicados', t.descuentos, MONEDA],
-    ['Pagos a colaboradoras', t.comisiones, MONEDA],
+    ['Comisiones', t.comisiones, MONEDA],
     ['Por cobrar a aseguradoras', t.porCobrar, MONEDA],
   ]);
   w.destacado('Monto para ' + nutri, t.neto, MONEDA);
@@ -1373,12 +1373,6 @@ function reporteGeneral_(w, regs, cats) {
     }),
     ['@', '0', MONEDA, MONEDA, MONEDA, '0.##%', MONEDA, MONEDA],
     ['Total', t.consultas, t.pagoPacientes, t.aseguradoras, t.facturado, '', t.comisiones, t.neto]);
-
-  w.subtitulo('Pagos a colaboradoras');
-  w.tabla(['Persona', 'Ubicaciones', 'Consultas', 'Total facturado', 'A pagar'],
-    res.encargados.map(function (e) { return [e.nombre, e.ubicaciones.join(', '), e.consultas, e.facturado, e.comision]; }),
-    ['@', '@', '0', MONEDA, MONEDA],
-    ['Total', '', '', '', t.comisiones]);
 
   w.subtitulo('Por aseguradora');
   w.tabla(['Aseguradora', 'Consultas', 'Monto', 'Pendiente', 'Facturado', 'Pagado'],
