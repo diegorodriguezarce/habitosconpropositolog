@@ -81,13 +81,13 @@ prueba('setup sobre una hoja vieja completa vacíos sin pisar datos', () => {
     ['Curridabat', 'Encargado Curridabat', 0.35, 'Total facturado', 'Sí'],
   ]);
   ctx.setup();
-  igual(a.getRange(1, 1, 2, 6).getValues(), [
-    ['Aseguradora', 'Monto aseguradora', 'Activa', 'Monto paciente', 'Ubicaciones', 'Excepto tipos'],
-    ['Sana Sana', 8500, 'Sí', 16000, 'Escazú', 'Pareja primera vez, Pareja control, Mediciones'],
+  igual(a.getRange(1, 1, 2, 7).getValues(), [
+    ['Aseguradora', 'Monto aseguradora', 'Activa', 'Monto paciente', 'Ubicaciones', 'Excepto tipos', 'Lo cobra'],
+    ['Sana Sana', 8500, 'Sí', 16000, 'Escazú', 'Pareja primera vez, Pareja control, Mediciones', 'Sede'],
   ]);
   igual(u.getRange(2, 1, 2, 3).getValues(), [['Escazú', 'Andrea', 0.4], ['Curridabat', 'Encargado Curridabat', 0.35]]);
   const b = ctx.getBootstrap();
-  igual(b.cats.aseguradoras, [{ nombre: 'Sana Sana', monto: 8500, montoPaciente: 16000, ubicaciones: ['Escazú'], exceptoTipos: SIN_SEGURO }]);
+  igual(b.cats.aseguradoras, [{ nombre: 'Sana Sana', monto: 8500, montoPaciente: 16000, ubicaciones: ['Escazú'], exceptoTipos: SIN_SEGURO, loCobra: 'Sede' }]);
 });
 
 prueba('sincronizarTarifas agrega ubicaciones nuevas sin perder montos ni recargar', () => {
@@ -107,8 +107,9 @@ prueba('bootstrap entrega catálogos y nada con Date', () => {
   const b = ctx.getBootstrap();
   sinFechas(b);
   igual(b.cats.formas, ['SINPE', 'Tarjeta']);
+  igual(b.cats.formasSede, []);
   igual(b.cats.ubicaciones.map((u) => [u.nombre, u.porcentaje]), [['Escazú', 0.4], ['Curridabat', 0.4], ['Domicilio', 0.2]]);
-  igual(b.cats.aseguradoras, [{ nombre: 'Sana Sana', monto: 8500, montoPaciente: 16000, ubicaciones: ['Escazú'], exceptoTipos: SIN_SEGURO }]);
+  igual(b.cats.aseguradoras, [{ nombre: 'Sana Sana', monto: 8500, montoPaciente: 16000, ubicaciones: ['Escazú'], exceptoTipos: SIN_SEGURO, loCobra: 'Sede' }]);
   igual(b.cats.descuentos, [{ nombre: 'VOLK', porcentaje: 0.1, ubicaciones: ['Domicilio'], exceptoTipos: ['Mediciones'] }]);
   assert.strictEqual(b.tarifas['Primera vez']['Curridabat'], 40000);
   assert.strictEqual(b.tarifas['Mediciones']['Curridabat'], false);
@@ -180,6 +181,14 @@ prueba('descuento VOLK: 10% en Domicilio, no en Mediciones ni otras sedes', () =
   assert.throws(() => g({ tipo: 'Control', ubicacion: 'Escazú', pago1: 31500 }), /no aplica a Control en Escazú/);
 });
 
+prueba('descuento puntual "Otro" con monto digitado', () => {
+  const ctx = nuevoEntorno();
+  const base = { fecha: '2026-10-02', paciente: 'Mónica', tipo: 'Primera vez', ubicacion: 'Escazú', forma1: 'SINPE', descuento: 'Otro' };
+  const r = ctx.guardarRegistro(Object.assign({ montoDescuento: 10000, pago1: 40000 }, base)).registro;
+  igual([r.tarifa, r.descuento, r.montoDescuento, r.totalFacturado], [50000, 'Otro', 10000, 40000]);
+  assert.throws(() => ctx.guardarRegistro(Object.assign({ pago1: 40000 }, base)), /monto del descuento/);
+});
+
 prueba('validaciones', () => {
   const ctx = nuevoEntorno();
   const base = { fecha: '2026-10-13', paciente: 'X', tipo: 'Control', ubicacion: 'Escazú', pago1: 1000, forma1: 'SINPE' };
@@ -242,11 +251,21 @@ prueba('reporte del mes: parte de cada sede, de Moni y por colaboradora', () => 
   ]);
   assert.strictEqual(t.comisiones, 50800);
   assert.strictEqual(t.neto, 98700);
-  igual(r.encargados.map((e) => [e.nombre, e.ubicaciones, e.consultas, e.comision]), [
-    ['Andrea (DS · Diseñando tu Salud)', ['Escazú', 'Domicilio'], 3, 38800],
-    ['Raque', ['Curridabat'], 1, 12000],
+  igual(r.encargados.map((e) => [e.nombre, e.ubicaciones, e.consultas, e.comision, e.cobradoSede, e.saldo]), [
+    ['Andrea (DS · Diseñando tu Salud)', ['Escazú', 'Domicilio'], 3, 38800, 8500, 30300],
+    ['Raque', ['Curridabat'], 1, 12000, 0, 12000],
   ]);
+  // Sana Sana se cobra con el datáfono de DS: DS ya tiene esos 8 500
+  igual([r.ubicaciones[0].comision, r.ubicaciones[0].cobradoSede, r.ubicaciones[0].saldo], [29800, 8500, 21300]);
+  igual([t.cobradoSede, t.saldoColaboradoras], [8500, 42300]);
   igual(r.formas.map((f) => [f.nombre, f.monto]), [['SINPE', 88500], ['Tarjeta', 52500]]);
+
+  // Una forma de pago que recibe la sede también se descuenta del saldo
+  hoja(ctx, 'Formas de pago').getRange(4, 1, 1, 3).setValues([['Datáfono DS', 'Sede', 'Sí']]);
+  ctx.guardarRegistro({ fecha: '2026-10-05', paciente: 'G', tipo: 'Control', ubicacion: 'Escazú', pago1: 35000, forma1: 'Datáfono DS' });
+  const r2 = ctx.getReporteMes('2026-10');
+  igual([r2.ubicaciones[0].comision, r2.ubicaciones[0].cobradoSede, r2.ubicaciones[0].saldo], [43800, 43500, 300]);
+  ctx.eliminarRegistro(ctx.getRecientes(1)[0].id);
 
   // Base "Pago paciente" en Escazú: la comisión no incluye lo de la aseguradora
   hoja(ctx, 'Ubicaciones').getRange(2, 4).setValue('Pago paciente');
@@ -269,9 +288,10 @@ prueba('exportar reportes: general, sede, colaboradora y aseguradora', () => {
     return JSON.stringify(sh.getRange(1, 1, sh.getLastRow(), 8).getValues());
   };
   const casos = [
-    [{ tipo: 'general' }, ['Monto para Moni', '98700', 'Pagos a colaboradoras', '38800']],
-    [{ tipo: 'sede', filtro: 'Curridabat' }, ['Monto a pagar a Raque', '12000', 'Monto para Moni', '18000']],
-    [{ tipo: 'encargado', filtro: 'Andrea (DS · Diseñando tu Salud)' }, ['Total a pagar a Andrea', '38800', '"Domicilio"', '(VOLK)']],
+    [{ tipo: 'general' }, ['Monto para Moni', '98700', 'Pagos a colaboradoras', '38800', '30300', 'Saldo a pagar a colaboradoras']],
+    [{ tipo: 'sede', filtro: 'Curridabat' }, ['Saldo a pagar a Raque', '12000', 'Monto para Moni', '18000']],
+    [{ tipo: 'sede', filtro: 'Escazú' }, ['Ya cobrado por la sede', '-8500', 'Saldo a pagar a Andrea', '21300']],
+    [{ tipo: 'encargado', filtro: 'Andrea (DS · Diseñando tu Salud)' }, ['Saldo a pagar a Andrea', '30300', '"Domicilio"', '(VOLK)']],
     [{ tipo: 'aseguradora', filtro: 'Sana Sana' }, ['"B"', '8500', 'Total a cobrar a Sana Sana']],
   ];
   casos.forEach(([opc, esperado], i) => {
@@ -282,7 +302,7 @@ prueba('exportar reportes: general, sede, colaboradora y aseguradora', () => {
     esperado.forEach((e) => assert.ok(tx.includes(e), opc.tipo + ': falta ' + e + '\n' + tx));
   });
   assert.ok(ctx.exportarReporte({ tipo: 'encargado', filtro: 'Raque', mes: '2026-10', nombres: false }).nombre.includes('Liquidación Raque'));
-  assert.ok(!texto(4).includes('"C"'), 'sin nombres de pacientes');
+  assert.ok(!texto(5).includes('"C"'), 'sin nombres de pacientes');
 });
 
 prueba('importar registros desde la pestaña Importar: por nombre de columna y sin duplicar', () => {

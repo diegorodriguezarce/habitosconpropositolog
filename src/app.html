@@ -117,12 +117,15 @@
     if (conSeguro()) return null;
     return descuentosAqui().find((d) => d.nombre === getChip('descuento')) || null;
   }
+  const OTRO = 'Otro';
+  const esDescuentoOtro = () => !conSeguro() && getChip('descuento') === OTRO;
 
   /** Lo que se espera que pague el paciente: tarifa (− descuento), o total con seguro − aseguradora. */
   function esperadoPaciente() {
     if (conSeguro()) return val('totalSeguro') === '' ? null : Math.max(0, num('totalSeguro') - num('montoAseguradora'));
     const t = tarifaLista();
     if (t === null) return null;
+    if (esDescuentoOtro()) return Math.max(0, t - num('montoDescuentoOtro'));
     const d = descuentoActual();
     return d ? t - Math.round(t * d.porcentaje) : t;
   }
@@ -149,12 +152,13 @@
     $$('.chips[data-name=aseguradora] .chip').forEach((b) => { b.hidden = !asegs.some((a) => a.nombre === b.dataset.value); });
     if (getChip('aseguradora') && !asegs.some((a) => a.nombre === getChip('aseguradora'))) setChip('aseguradora', '');
 
+    // Descuentos del catálogo que aplican aquí, más "Otro" (monto puntual) siempre disponible sin seguro.
     const descs = conSeguro() ? [] : descuentosAqui();
-    $('#grupoDescuento').classList.toggle('oculto', !descs.length);
-    $$('.chips[data-name=descuento] .chip').forEach((b) => {
-      b.hidden = b.dataset.value !== 'Ninguno' && !descs.some((d) => d.nombre === b.dataset.value);
-    });
-    if (!descs.some((d) => d.nombre === getChip('descuento'))) setChip('descuento', 'Ninguno');
+    const permitido = (v) => v === 'Ninguno' || (!conSeguro() && v === OTRO) || descs.some((d) => d.nombre === v);
+    $('#grupoDescuento').classList.toggle('oculto', conSeguro());
+    $$('.chips[data-name=descuento] .chip').forEach((b) => { b.hidden = !permitido(b.dataset.value); });
+    if (!permitido(getChip('descuento'))) setChip('descuento', 'Ninguno');
+    $('#grupoDescuentoOtro').classList.toggle('oculto', !esDescuentoOtro());
   }
 
   /** Reparte el monto esperado en uno o dos pagos (o redistribuye lo ya digitado). */
@@ -205,7 +209,8 @@
       if (t === null) hint = 'Sin tarifa en la hoja: digite el monto';
       else if (typeof t === 'number') {
         hint = 'Tarifa ' + ubic + ': ' + colones(t) + (pareja ? ' por persona' : '') +
-          (d ? ' · ' + d.nombre + ' −' + pct(d.porcentaje) : '');
+          (d ? ' · ' + d.nombre + ' −' + pct(d.porcentaje) : '') +
+          (esDescuentoOtro() && num('montoDescuentoOtro') ? ' · descuento −' + colones(num('montoDescuentoOtro')) : '');
       }
     }
     $('#hintTarifa').textContent = hint;
@@ -324,6 +329,7 @@
       conSeguro: seguro,
       aseguradora: seguro ? getChip('aseguradora') : '',
       descuento: !seguro && getChip('descuento') !== 'Ninguno' ? getChip('descuento') : '',
+      montoDescuento: esDescuentoOtro() ? num('montoDescuentoOtro') : '',
       montoAseguradora: seguro ? num('montoAseguradora') : 0,
       estadoAseguradora: seguro ? getChip('estado') : '',
       dosPagos: dos,
@@ -349,6 +355,7 @@
     if (val('pago1') === '') marca('#pago1', 'monto');
     if (d.pago1 > 0 && !d.forma1) marca('.chips[data-name=forma1]', 'forma de pago');
     if (d.dosPagos && d.pago2 > 0 && !d.forma2) marca('.chips[data-name=forma2]', 'forma del 2.º pago');
+    if (d.descuento === OTRO && !d.montoDescuento) marca('#montoDescuentoOtro', 'monto del descuento');
     return faltan;
   }
 
@@ -421,7 +428,9 @@
     setChip('tipo', reg.tipo);
     setChip('ubicacion', reg.ubicacion);
     setChip('conSeguro', reg.conSeguro ? 'Sí' : 'No');
-    setChip('descuento', reg.descuento || 'Ninguno');
+    const enCatalogo = S.cats.descuentos.some((d) => d.nombre === reg.descuento);
+    setChip('descuento', !reg.descuento ? 'Ninguno' : enCatalogo ? reg.descuento : OTRO);
+    if (reg.descuento && !enCatalogo) $('#montoDescuentoOtro').value = reg.montoDescuento || '';
     if (reg.conSeguro) {
       setChip('aseguradora', reg.aseguradora);
       $('#totalSeguro').value = reg.totalFacturado;
@@ -515,7 +524,8 @@
     $('#kpis').innerHTML = [
       ['Total facturado', colones(t.facturado), t.consultas + ' consultas · ' + t.personas + ' personas', true],
       ['Para ' + S.nutri, colones(t.neto), 'después de pagar a colaboradoras'],
-      ['Pagos a colaboradoras', colones(t.comisiones), t.descuentos ? 'Descuentos dados: ' + colones(t.descuentos) : 'según % de cada sede'],
+      ['Saldo a pagar a colaboradoras', colones(t.saldoColaboradoras),
+        t.cobradoSede ? 'Comisión ' + colones(t.comisiones) + ' − ya cobrado por sedes ' + colones(t.cobradoSede) : 'según % de cada sede'],
       ['Por cobrar a aseguradoras', colones(t.porCobrar), 'pendiente + facturado'],
     ].map((k) => '<div class="kpi' + (k[3] ? ' destacado' : '') + '"><div class="kpi-label">' + k[0] + '</div><div class="kpi-valor">' + k[1] + '</div><div class="kpi-sub">' + esc(k[2]) + '</div></div>').join('');
 
@@ -529,8 +539,13 @@
       ]),
       ['Total', t.consultas, colones(t.facturado), colones(t.comisiones), colones(t.neto)]) +
       (r.encargados.length ? '<div class="colab"><h3>A pagar por persona</h3>' + tabla(
-        [{ t: 'Persona' }, { t: 'Consultas', num: 1 }, { t: 'A pagar', num: 1 }],
-        r.encargados.map((e) => [esc(e.nombre) + '<span class="sub">' + esc(e.ubicaciones.join(' + ')) + '</span>', e.consultas, colones(e.comision)])) +
+        [{ t: 'Persona' }, { t: 'Comisión', num: 1 }, { t: 'Ya cobró', num: 1 }, { t: 'Saldo', num: 1 }],
+        r.encargados.map((e) => [
+          esc(e.nombre) + '<span class="sub">' + esc(e.ubicaciones.join(' + ')) + ' · ' + e.consultas + ' consultas</span>',
+          colones(e.comision), e.cobradoSede ? colones(e.cobradoSede) : '—',
+          '<strong>' + (e.saldo < 0 ? 'Le debe ' + colones(-e.saldo) : colones(e.saldo)) + '</strong>',
+        ]),
+        ['Total', colones(t.comisiones), colones(t.cobradoSede), colones(t.saldoColaboradoras)]) +
       '</div>' : '');
 
     $('#tablaAseg').innerHTML = tabla(
@@ -625,6 +640,7 @@
     $('#paciente').addEventListener('input', () => { if (!val('paciente')) revisarPaciente(); });
     $('#paciente2').addEventListener('input', actualizarVista);
     ['totalSeguro', 'montoAseguradora'].forEach((id) => $('#' + id).addEventListener('input', repartirPagos));
+    $('#montoDescuentoOtro').addEventListener('input', () => { actualizarVista(); repartirPagos(); });
     ['pago1', 'pago2'].forEach((id) => $('#' + id).addEventListener('input', actualizarResumen));
     $('#dosPagos').addEventListener('change', () => { actualizarVista(); repartirPagos(); });
     $('#btnExportar').addEventListener('click', exportar);
@@ -653,7 +669,11 @@
       if (v === 'Sí') $('#totalSeguro').focus();
     });
     chips('aseguradora', c.aseguradoras.map((a) => a.nombre), (v) => { elegirAseguradora(v); repartirPagos(); });
-    chips('descuento', ['Ninguno'].concat(c.descuentos.map((d) => d.nombre)), () => { actualizarVista(); repartirPagos(); });
+    chips('descuento', ['Ninguno'].concat(c.descuentos.map((d) => d.nombre), [OTRO]), (v) => {
+      actualizarVista();
+      repartirPagos();
+      if (v === OTRO) $('#montoDescuentoOtro').focus();
+    });
     chips('estado', c.estados);
     chips('forma1', c.formas);
     chips('forma2', c.formas);

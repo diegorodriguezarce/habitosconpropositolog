@@ -17,7 +17,8 @@ Reglas:
   - Solo se importan filas con estado "Confirmada"; el resto va a "Revisar".
   - Nuevo / Inicial → Primera vez · Inicial Pareja → Pareja primera vez (dos filas
     seguidas del mismo día se unen en un registro de pareja) · Medición → Mediciones.
-  - Datáfono → Tarjeta · SINPE → SINPE · "Descuento 10% (VOLK)" → descuento VOLK.
+  - Datáfono → Tarjeta · SINPE → SINPE · "Descuento 10% (VOLK)" → descuento VOLK; otros
+    "Descuento ..." → descuento "Otro" por la diferencia con la tarifa de lista.
   - Columna SANA SANA → seguro Sana Sana (estado del cobro: Pendiente).
   - Nombres incompletos se completan con la hoja "Base de datos" cuando hay un único candidato.
 """
@@ -204,7 +205,8 @@ def convertir(ruta, anio, hoy):
             'conSeguro': 'Sí' if sana else 'No', 'aseguradora': 'Sana Sana' if sana else '',
             'pago1': cobro, 'forma1': forma if cobro else '', 'pago2': '', 'forma2': '',
             'montoAseguradora': sana or '', 'estadoAseguradora': 'Pendiente' if sana else '',
-            'descuento': 'VOLK' if volk else '', 'notas': notas, 'celda': f['celda'],
+            'descuento': 'VOLK' if volk else ('Otro' if 'descuento' in norm(obs) else ''),
+            'notas': notas, 'celda': f['celda'],
         }
 
         if tipo.startswith('Pareja'):
@@ -230,7 +232,13 @@ def convertir(ruta, anio, hoy):
         personas = 2 if r['tipo'].startswith('Pareja') else 1
         base_t = TARIFAS.get(r['tipo'], {}).get(r['ubicacion'])
         r['tarifa'] = base_t * personas if base_t else ''
-        r['montoDescuento'] = round(r['tarifa'] * VOLK) if r['descuento'] and r['tarifa'] else ''
+        if r['descuento'] == 'VOLK' and r['tarifa']:
+            r['montoDescuento'] = round(r['tarifa'] * VOLK)
+        elif r['descuento'] == 'Otro' and r['tarifa']:
+            # Descuento puntual: lo que faltó para llegar a la tarifa de lista
+            r['montoDescuento'] = max(0, r['tarifa'] - (r['pago1'] or 0) - (r['pago2'] or 0) - (r['montoAseguradora'] or 0)) or ''
+        else:
+            r['montoDescuento'] = ''
         r['totalPaciente'] = (r['pago1'] or 0) + (r['pago2'] or 0)
         r['totalFacturado'] = r['totalPaciente'] + (r['montoAseguradora'] or 0)
     registros.sort(key=lambda r: (r['fecha'], r['ubicacion']))
