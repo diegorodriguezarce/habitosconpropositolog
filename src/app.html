@@ -1,0 +1,619 @@
+<script>
+(function () {
+  'use strict';
+
+  /* ───────── Utilidades ───────── */
+  const $ = (s, el) => (el || document).querySelector(s);
+  const $$ = (s, el) => Array.from((el || document).querySelectorAll(s));
+  const colones = (n) => '₡' + Math.round(Number(n) || 0).toLocaleString('es-CR');
+  const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const aFecha = (s) => { const p = String(s).split('-'); return new Date(+p[0], +p[1] - 1, +p[2]); };
+  const fechaLarga = (s) => aFecha(s).toLocaleDateString('es-CR', { weekday: 'long', day: 'numeric', month: 'long' });
+  const fechaCorta = (s) => aFecha(s).toLocaleDateString('es-CR', { weekday: 'short', day: 'numeric', month: 'short' });
+  const iso = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+
+  function api(fn) {
+    const args = Array.prototype.slice.call(arguments, 1);
+    return new Promise((resolve, reject) => {
+      google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[fn].apply(null, args);
+    });
+  }
+  const mensajeError = (e) => (e && e.message ? e.message : String(e)).replace(/^Error:\s*/, '').replace(/^Exception:\s*/, '');
+
+  let toastTimer;
+  function toast(msg, tipo) {
+    const t = $('#toast');
+    t.textContent = msg;
+    t.className = 'toast ver' + (tipo === 'error' ? ' error' : '');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.className = 'toast' + (tipo === 'error' ? ' error' : ''); }, tipo === 'error' ? 5000 : 2600);
+  }
+
+  function confirmar(texto, si) {
+    return new Promise((resolve) => {
+      $('#modalTexto').textContent = texto;
+      $('#modalSi').textContent = si || 'Sí';
+      $('#modal').classList.remove('oculto');
+      const cerrar = (v) => { $('#modal').classList.add('oculto'); $('#modalSi').onclick = $('#modalNo').onclick = null; resolve(v); };
+      $('#modalSi').onclick = () => cerrar(true);
+      $('#modalNo').onclick = () => cerrar(false);
+    });
+  }
+
+  /* ───────── Estado ───────── */
+  const S = {
+    cats: null,
+    tarifas: {},
+    pacientes: new Map(),   // nombre normalizado → { n, u }
+    recientes: [],
+    editId: null,
+    tipoManual: false,      // la usuaria eligió el tipo: no sugerir encima
+    tipoSugerido: '',
+    eventos: [],
+    eventoSel: '',
+    pedidoEventos: 0,
+    reporte: null,
+  };
+
+  /* ───────── Chips ───────── */
+  function chips(name, opciones, onChange) {
+    const el = $('.chips[data-name="' + name + '"]');
+    el.innerHTML = '';
+    opciones.forEach((o) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chip';
+      b.textContent = o;
+      b.dataset.value = o;
+      b.setAttribute('aria-pressed', 'false');
+      b.addEventListener('click', () => {
+        setChip(name, o);
+        el.classList.remove('error');
+        if (onChange) onChange(o);
+      });
+      el.appendChild(b);
+    });
+  }
+  const getChip = (name) => $('.chips[data-name="' + name + '"]').dataset.value || '';
+  function setChip(name, v) {
+    const el = $('.chips[data-name="' + name + '"]');
+    el.dataset.value = v || '';
+    $$('.chip', el).forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.value === v)));
+  }
+
+  /* ───────── Lógica del formulario ───────── */
+  const tipoActual = () => S.cats.tipos.find((t) => t.nombre === getChip('tipo'));
+  const esPareja = () => !!(tipoActual() && tipoActual().pareja);
+  const conSeguro = () => getChip('conSeguro') === 'Sí';
+  const dosPagos = () => $('#dosPagos').checked;
+  const val = (id) => $('#' + id).value;
+  const num = (id) => { const v = val(id); return v === '' ? 0 : Math.max(0, Math.round(Number(v)) || 0); };
+
+  function tarifaActual() {
+    const fila = S.tarifas[getChip('tipo')];
+    const v = fila ? fila[getChip('ubicacion')] : null;
+    return v === null || v === undefined || v === '' ? null : Number(v);
+  }
+
+  /** Lo que se espera que pague el paciente: tarifa, o total con seguro − aseguradora. */
+  function esperadoPaciente() {
+    if (conSeguro()) return val('totalSeguro') === '' ? null : Math.max(0, num('totalSeguro') - num('montoAseguradora'));
+    return tarifaActual();
+  }
+
+  /** Reparte el monto esperado en uno o dos pagos (o redistribuye lo ya digitado). */
+  function repartirPagos() {
+    let m = esperadoPaciente();
+    if (m === null) m = num('pago1') + (dosPagos() ? num('pago2') : 0) || null;
+    if (m === null) { actualizarResumen(); return; }
+    if (dosPagos()) {
+      const a = Math.round(m / 2);
+      $('#pago1').value = a;
+      $('#pago2').value = m - a;
+    } else {
+      $('#pago1').value = m;
+      $('#pago2').value = '';
+    }
+    actualizarResumen();
+  }
+
+  function actualizarVista() {
+    const pareja = esPareja();
+    const seguro = conSeguro();
+    const dos = dosPagos();
+    const p1 = val('paciente').trim();
+    const p2 = val('paciente2').trim();
+
+    $('#grupoPaciente2').classList.toggle('oculto', !pareja);
+    $('#tituloPacientes').textContent = pareja ? 'Pareja' : 'Paciente';
+    $('#lblPaciente').textContent = pareja ? 'Nombre de la primera persona' : 'Nombre completo';
+    $('#bloqueSeguro').classList.toggle('oculto', !seguro);
+    $('#grupoPago2').classList.toggle('oculto', !dos);
+    $('#lblDosPagos').textContent = pareja ? 'Pagan por separado' : 'Dividir en dos pagos';
+
+    if (dos) {
+      $('#lblPago1').textContent = pareja ? 'Paga ' + (p1.split(' ')[0] || 'persona 1') : 'Primer pago';
+      $('#lblPago2').textContent = pareja ? 'Paga ' + (p2.split(' ')[0] || 'persona 2') : 'Segundo pago';
+    } else {
+      $('#lblPago1').textContent = seguro ? 'Paga el paciente' : (pareja ? 'Monto (ambos)' : 'Monto');
+    }
+
+    const tipo = getChip('tipo');
+    const ubic = getChip('ubicacion');
+    let hint = '';
+    if (seguro) hint = 'Con seguro: total − aseguradora';
+    else if (tipo && ubic) {
+      const t = tarifaActual();
+      hint = t === null ? 'Sin tarifa en la hoja: digite el monto' : 'Tarifa ' + ubic + ': ' + colones(t);
+    }
+    $('#hintTarifa').textContent = hint;
+    actualizarResumen();
+  }
+
+  function actualizarResumen() {
+    const paciente = num('pago1') + (dosPagos() ? num('pago2') : 0);
+    const aseg = conSeguro() ? num('montoAseguradora') : 0;
+    $('#resumenTotal').textContent = colones(paciente + aseg);
+    $('#resumenDet').textContent = aseg ? 'Paciente ' + colones(paciente) + ' · Seguro ' + colones(aseg) : 'Total facturado';
+
+    const esperado = esperadoPaciente();
+    const aviso = $('#avisoMonto');
+    const hayMonto = val('pago1') !== '' || (dosPagos() && val('pago2') !== '');
+    if (esperado !== null && hayMonto && paciente !== esperado) {
+      aviso.textContent = conSeguro()
+        ? 'Los pagos (' + colones(paciente) + ') + aseguradora (' + colones(aseg) + ') no suman el total con seguro (' + colones(num('totalSeguro')) + ').'
+        : 'El monto (' + colones(paciente) + ') es distinto a la tarifa (' + colones(esperado) + '). Se guarda lo que digitó.';
+      aviso.classList.remove('oculto');
+    } else {
+      aviso.classList.add('oculto');
+    }
+  }
+
+  function buscarTipo(pareja, clave) {
+    const t = S.cats.tipos.find((x) => !!x.pareja === pareja && norm(x.nombre).indexOf(clave) >= 0);
+    return t ? t.nombre : '';
+  }
+
+  /** Muestra si el paciente ya ha venido y sugiere Primera vez / Control. */
+  function revisarPaciente() {
+    const n = val('paciente').trim();
+    const info = S.pacientes.get(norm(n));
+    const el = $('#infoPaciente');
+    if (!n) { el.textContent = ''; el.className = 'ayuda'; }
+    else if (info) { el.textContent = '✓ Ya ha venido · última consulta ' + fechaCorta(info.u); el.className = 'ayuda recurrente'; }
+    else { el.textContent = 'Paciente nuevo'; el.className = 'ayuda nuevo'; }
+
+    if (!n || S.tipoManual || S.editId) return;
+    const actual = getChip('tipo');
+    if (actual && actual !== S.tipoSugerido) return;
+    const pareja = esPareja();
+    const sug = buscarTipo(pareja, info ? 'control' : 'primera');
+    if (sug && sug !== actual) {
+      setChip('tipo', sug);
+      S.tipoSugerido = sug;
+      actualizarVista();
+      repartirPagos();
+    }
+  }
+
+  /* ───────── Calendario ───────── */
+  async function cargarEventos() {
+    const f = val('fecha');
+    if (!f) return;
+    const pedido = ++S.pedidoEventos;
+    $('#agendaFecha').textContent = fechaLarga(f);
+    $('#eventos').innerHTML = '<p class="vacio">Buscando citas…</p>';
+    try {
+      const r = await api('getEventos', f);
+      if (pedido !== S.pedidoEventos) return;
+      S.eventos = r.eventos || [];
+      pintarEventos(r.error);
+    } catch (e) {
+      if (pedido !== S.pedidoEventos) return;
+      $('#eventos').innerHTML = '<p class="vacio">No se pudo leer el calendario: ' + esc(mensajeError(e)) + '</p>';
+    }
+  }
+
+  function pintarEventos(error) {
+    const el = $('#eventos');
+    if (!S.eventos.length) {
+      el.innerHTML = '<p class="vacio">' + (error ? esc(error) : 'No hay citas en el calendario para este día.') + '</p>';
+      return;
+    }
+    el.innerHTML = S.eventos.map((e, i) =>
+      '<button type="button" class="evento' + (e.registrado ? ' hecho' : '') + (e.id === S.eventoSel ? ' sel' : '') + '" data-i="' + i + '">' +
+        (e.registrado ? '<span class="evento-badge">✓ Registrada</span>' : '') +
+        '<div class="evento-hora">' + esc(e.hora) + (e.horaFin ? '–' + esc(e.horaFin) : '') +
+          (e.fuente === 'iCal' ? '<span class="evento-fuente">iCal</span>' : '') + '</div>' +
+        '<div class="evento-titulo">' + esc(e.titulo) + '</div>' +
+        (e.lugar ? '<div class="evento-lugar">' + esc(e.lugar) + '</div>' : '') +
+      '</button>').join('') +
+      (error ? '<p class="vacio">' + esc(error) + '</p>' : '');
+    $$('.evento', el).forEach((b) => b.addEventListener('click', () => usarEvento(S.eventos[+b.dataset.i])));
+  }
+
+  async function usarEvento(ev) {
+    if (ev.registrado && !(await confirmar('Esta cita ya está registrada. ¿Registrarla otra vez?', 'Registrar otra vez'))) return;
+    if (ev.hora) $('#hora').value = ev.hora;
+    if (ev.paciente) $('#paciente').value = ev.paciente;
+    $('#paciente2').value = ev.paciente2 || '';
+    if (ev.tipo) { setChip('tipo', ev.tipo); S.tipoManual = true; }
+    if (ev.ubicacion) setChip('ubicacion', ev.ubicacion);
+    S.eventoSel = ev.id;
+    pintarEventos();
+    actualizarVista();
+    revisarPaciente();
+    repartirPagos();
+    $('#paciente').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  /* ───────── Guardar / editar ───────── */
+  function recolectar() {
+    const seguro = conSeguro();
+    const dos = dosPagos();
+    return {
+      id: S.editId || '',
+      fecha: val('fecha'),
+      hora: val('hora'),
+      paciente: val('paciente').trim(),
+      paciente2: esPareja() ? val('paciente2').trim() : '',
+      tipo: getChip('tipo'),
+      ubicacion: getChip('ubicacion'),
+      conSeguro: seguro,
+      aseguradora: seguro ? getChip('aseguradora') : '',
+      montoAseguradora: seguro ? num('montoAseguradora') : 0,
+      estadoAseguradora: seguro ? getChip('estado') : '',
+      dosPagos: dos,
+      pago1: num('pago1'),
+      forma1: getChip('forma1'),
+      pago2: dos ? num('pago2') : 0,
+      forma2: dos ? getChip('forma2') : '',
+      notas: val('notas').trim(),
+      eventoId: S.eventoSel || '',
+    };
+  }
+
+  function validar(d) {
+    $$('.error').forEach((x) => x.classList.remove('error'));
+    const faltan = [];
+    const marca = (sel, txt) => { const el = $(sel); if (el) el.classList.add('error'); faltan.push(txt); };
+    if (!d.fecha) marca('#fecha', 'fecha');
+    if (!d.tipo) marca('.chips[data-name=tipo]', 'tipo de cita');
+    if (!d.ubicacion) marca('.chips[data-name=ubicacion]', 'ubicación');
+    if (!d.paciente) marca('#paciente', 'nombre');
+    if (esPareja() && !d.paciente2) marca('#paciente2', 'segunda persona');
+    if (d.conSeguro && !d.aseguradora) marca('.chips[data-name=aseguradora]', 'aseguradora');
+    if (val('pago1') === '') marca('#pago1', 'monto');
+    if (d.pago1 > 0 && !d.forma1) marca('.chips[data-name=forma1]', 'forma de pago');
+    if (d.dosPagos && d.pago2 > 0 && !d.forma2) marca('.chips[data-name=forma2]', 'forma del 2.º pago');
+    return faltan;
+  }
+
+  async function guardar(ev) {
+    ev.preventDefault();
+    const d = recolectar();
+    const faltan = validar(d);
+    if (faltan.length) {
+      toast('Falta: ' + faltan.join(', '), 'error');
+      const primero = $('.error');
+      if (primero) primero.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+    const btn = $('#btnGuardar');
+    btn.disabled = true;
+    btn.textContent = 'Guardando…';
+    try {
+      const r = await api('guardarRegistro', d);
+      const editando = !!S.editId;
+      cargarPacientes(r.pacientes);
+      S.recientes = r.recientes;
+      pintarRecientes();
+      const ev = S.eventos.find((x) => x.id === d.eventoId);
+      if (ev) ev.registrado = true;
+      toast(editando ? 'Cambios guardados ✓' : 'Consulta de ' + r.registro.paciente.split(' ')[0] + ' guardada ✓');
+      limpiarForm(true);
+      if (editando) mostrarVista('recientes');
+      S.reporte = null;
+    } catch (e) {
+      toast(mensajeError(e), 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = S.editId ? 'Guardar cambios' : 'Guardar';
+    }
+  }
+
+  function limpiarForm(mantener) {
+    const fecha = val('fecha');
+    const ubic = getChip('ubicacion');
+    $('#form').reset();
+    $$('.error').forEach((x) => x.classList.remove('error'));
+    ['tipo', 'ubicacion', 'aseguradora', 'estado', 'forma1', 'forma2'].forEach((n) => setChip(n, ''));
+    setChip('conSeguro', 'No');
+    $('#fecha').value = mantener && fecha ? fecha : iso(new Date());
+    if (mantener && ubic) setChip('ubicacion', ubic);
+    S.editId = null;
+    S.tipoManual = false;
+    S.tipoSugerido = '';
+    S.eventoSel = '';
+    $('#tituloForm').textContent = 'Nueva';
+    $('#btnGuardar').textContent = 'Guardar';
+    $('#btnCancelar').classList.add('oculto');
+    $('#btnEliminar').classList.add('oculto');
+    $('#cardAgenda').classList.remove('oculto');
+    $('#infoPaciente').textContent = '';
+    actualizarVista();
+    if (fecha !== val('fecha') || !S.eventos.length) cargarEventos(); else pintarEventos();
+  }
+
+  function editar(reg) {
+    limpiarForm(false);
+    S.editId = reg.id;
+    S.tipoManual = true;
+    S.eventoSel = reg.eventoId || '';
+    $('#fecha').value = reg.fecha;
+    $('#hora').value = reg.hora;
+    $('#paciente').value = reg.paciente;
+    $('#paciente2').value = reg.paciente2;
+    setChip('tipo', reg.tipo);
+    setChip('ubicacion', reg.ubicacion);
+    setChip('conSeguro', reg.conSeguro ? 'Sí' : 'No');
+    if (reg.conSeguro) {
+      setChip('aseguradora', reg.aseguradora);
+      $('#totalSeguro').value = reg.totalFacturado;
+      $('#montoAseguradora').value = reg.montoAseguradora;
+      setChip('estado', reg.estadoAseguradora || 'Pendiente');
+    }
+    const dos = reg.pago2 > 0 || !!reg.forma2;
+    $('#dosPagos').checked = dos;
+    $('#pago1').value = reg.pago1;
+    setChip('forma1', reg.forma1);
+    if (dos) { $('#pago2').value = reg.pago2; setChip('forma2', reg.forma2); }
+    $('#notas').value = reg.notas;
+    $('#tituloForm').textContent = 'Editar';
+    $('#btnGuardar').textContent = 'Guardar cambios';
+    $('#btnCancelar').classList.remove('oculto');
+    $('#btnEliminar').classList.remove('oculto');
+    $('#cardAgenda').classList.add('oculto');
+    actualizarVista();
+    revisarPaciente();
+    mostrarVista('registrar');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  async function eliminar() {
+    if (!S.editId) return;
+    if (!(await confirmar('¿Eliminar este registro? No se puede deshacer.', 'Eliminar'))) return;
+    try {
+      const r = await api('eliminarRegistro', S.editId);
+      S.recientes = r.recientes;
+      cargarPacientes(r.pacientes);
+      pintarRecientes();
+      toast('Registro eliminado');
+      limpiarForm(false);
+      mostrarVista('recientes');
+      S.reporte = null;
+    } catch (e) {
+      toast(mensajeError(e), 'error');
+    }
+  }
+
+  /* ───────── Recientes ───────── */
+  function pintarRecientes() {
+    const el = $('#listaRecientes');
+    if (!S.recientes.length) { el.innerHTML = '<p class="vacio">Todavía no hay registros.</p>'; return; }
+    el.innerHTML = S.recientes.map((r, i) => {
+      const formas = [r.forma1, r.forma2].filter(Boolean).join(' + ');
+      return '<button type="button" class="reg" data-i="' + i + '">' +
+        '<span class="reg-fecha">' + esc(fechaCorta(r.fecha)) + (r.hora ? ' · ' + esc(r.hora) : '') +
+          '<span class="tag">' + esc(r.ubicacion) + '</span></span>' +
+        '<span class="reg-nombre">' + esc(r.paciente) + (r.paciente2 ? ' y ' + esc(r.paciente2) : '') + '</span>' +
+        '<span class="reg-meta">' + esc(r.tipo) + (formas ? ' · ' + esc(formas) : '') +
+          (r.conSeguro ? '<span class="tag ' + esc(r.estadoAseguradora) + '">' + esc(r.aseguradora) + ' · ' + esc(r.estadoAseguradora) + '</span>' : '') +
+        '</span>' +
+        '<span class="reg-monto">' + colones(r.totalFacturado) + '</span>' +
+      '</button>';
+    }).join('');
+    $$('.reg', el).forEach((b) => b.addEventListener('click', () => editar(S.recientes[+b.dataset.i])));
+  }
+
+  function cargarPacientes(lista) {
+    S.pacientes = new Map(lista.map((p) => [norm(p.n), p]));
+    $('#listaPacientes').innerHTML = lista.map((p) => '<option value="' + esc(p.n) + '">').join('');
+  }
+
+  /* ───────── Reportes ───────── */
+  async function cargarReporte() {
+    const mes = val('mes');
+    if (!mes) return;
+    $('#kpis').innerHTML = '<p class="vacio">Calculando…</p>';
+    try {
+      S.reporte = await api('getReporteMes', mes);
+      pintarReporte();
+    } catch (e) {
+      $('#kpis').innerHTML = '<p class="vacio">' + esc(mensajeError(e)) + '</p>';
+    }
+  }
+
+  function tabla(headers, filas, total) {
+    const th = headers.map((h) => '<th' + (h.num ? ' class="num"' : '') + '>' + esc(h.t) + '</th>').join('');
+    const fila = (r, cls) => '<tr' + (cls ? ' class="' + cls + '"' : '') + '>' +
+      r.map((c, i) => '<td' + (headers[i].num ? ' class="num"' : '') + '>' + c + '</td>').join('') + '</tr>';
+    const cuerpo = filas.length ? filas.map((r) => fila(r)).join('') : '<tr><td colspan="' + headers.length + '" class="vacio">Sin datos este mes</td></tr>';
+    return '<table><thead><tr>' + th + '</tr></thead><tbody>' + cuerpo + (total && filas.length ? fila(total, 'total') : '') + '</tbody></table>';
+  }
+
+  function pintarReporte() {
+    const r = S.reporte;
+    const t = r.totales;
+    const pct = (p) => (Math.round(p * 1000) / 10).toLocaleString('es-CR') + '%';
+    $('#repEtiqueta').textContent = r.etiqueta;
+    $('#kpis').innerHTML = [
+      ['Total facturado', colones(t.facturado), t.consultas + ' consultas · ' + t.personas + ' personas', true],
+      ['Pagado por pacientes', colones(t.pagoPacientes), 'efectivo, SINPE, tarjeta'],
+      ['Comisiones a sedes', colones(t.comisiones), 'Neto: ' + colones(t.neto)],
+      ['Por cobrar a aseguradoras', colones(t.porCobrar), 'pendiente + facturado'],
+    ].map((k) => '<div class="kpi' + (k[3] ? ' destacado' : '') + '"><div class="kpi-label">' + k[0] + '</div><div class="kpi-valor">' + k[1] + '</div><div class="kpi-sub">' + esc(k[2]) + '</div></div>').join('');
+
+    $('#tablaUbic').innerHTML = tabla(
+      [{ t: 'Ubicación' }, { t: 'Consultas', num: 1 }, { t: 'Facturado', num: 1 }, { t: '%', num: 1 }, { t: 'A pagar sede', num: 1 }],
+      r.ubicaciones.map((u) => [
+        esc(u.nombre) + (u.encargado ? '<span class="sub">' + esc(u.encargado) + (u.base === 'Pago paciente' ? ' · sobre pago paciente' : '') + '</span>' : ''),
+        u.consultas, colones(u.facturado), pct(u.porcentaje), colones(u.comision),
+      ]),
+      ['Total', t.consultas, colones(t.facturado), '', colones(t.comisiones)]);
+
+    $('#tablaAseg').innerHTML = tabla(
+      [{ t: 'Aseguradora' }, { t: 'Consultas', num: 1 }, { t: 'Pendiente', num: 1 }, { t: 'Facturado', num: 1 }, { t: 'Pagado', num: 1 }],
+      r.aseguradoras.map((a) => [esc(a.nombre), a.consultas, colones(a.Pendiente), colones(a.Facturado), colones(a.Pagado)]));
+    const acciones = r.aseguradoras.map((a) => {
+      const b = [];
+      if (a.Pendiente) b.push('<button type="button" class="btn-mini" data-aseg="' + esc(a.nombre) + '" data-de="Pendiente" data-a="Facturado">' + esc(a.nombre) + ': marcar pendientes como facturados</button>');
+      if (a.Facturado) b.push('<button type="button" class="btn-mini" data-aseg="' + esc(a.nombre) + '" data-de="Facturado" data-a="Pagado">' + esc(a.nombre) + ': marcar facturados como pagados</button>');
+      return b.join('');
+    }).join('');
+    if (acciones) $('#tablaAseg').insertAdjacentHTML('beforeend', '<div class="acc-mini">' + acciones + '</div>');
+    $$('#tablaAseg .btn-mini').forEach((b) => b.addEventListener('click', () => marcarEstado(b.dataset.aseg, b.dataset.de, b.dataset.a)));
+
+    $('#tablaTipo').innerHTML = tabla([{ t: 'Tipo de cita' }, { t: 'Consultas', num: 1 }, { t: 'Facturado', num: 1 }],
+      r.tipos.map((x) => [esc(x.nombre), x.consultas, colones(x.facturado)]));
+    $('#tablaForma').innerHTML = tabla([{ t: 'Forma de pago' }, { t: 'Pagos', num: 1 }, { t: 'Monto', num: 1 }],
+      r.formas.map((x) => [esc(x.nombre), x.pagos, colones(x.monto)]),
+      ['Total', r.formas.reduce((s, x) => s + x.pagos, 0), colones(t.pagoPacientes)]);
+  }
+
+  async function marcarEstado(aseg, de, a) {
+    if (!(await confirmar('¿Marcar las consultas de ' + aseg + ' en estado "' + de + '" de ' + S.reporte.etiqueta + ' como "' + a + '"?', 'Marcar'))) return;
+    try {
+      const r = await api('marcarEstadoAseguradora', val('mes'), aseg, de, a);
+      S.reporte = r.reporte;
+      pintarReporte();
+      toast(r.cambiados + ' consulta(s) marcadas como ' + a.toLowerCase());
+      S.recientes = await api('getRecientes', 10);
+      pintarRecientes();
+    } catch (e) {
+      toast(mensajeError(e), 'error');
+    }
+  }
+
+  function opcionesExport() {
+    const ops = [['general|', 'General del mes (todas las sedes y aseguradoras)']];
+    S.cats.ubicaciones.forEach((u) => ops.push(['sede|' + u.nombre, 'Liquidación de sede · ' + u.nombre]));
+    S.cats.aseguradoras.forEach((a) => ops.push(['aseguradora|' + a.nombre, 'Cobro a aseguradora · ' + a.nombre]));
+    $('#expTipo').innerHTML = ops.map((o) => '<option value="' + esc(o[0]) + '">' + esc(o[1]) + '</option>').join('');
+  }
+
+  async function exportar() {
+    const partes = val('expTipo').split('|');
+    const btn = $('#btnExportar');
+    btn.disabled = true;
+    btn.textContent = 'Generando…';
+    try {
+      const r = await api('exportarReporte', { tipo: partes[0], filtro: partes[1], mes: val('mes'), nombres: $('#expNombres').checked });
+      $('#expResultados').insertAdjacentHTML('afterbegin',
+        '<div class="export-item"><strong>' + esc(r.nombre) + '</strong>' +
+        '<a href="' + esc(r.url) + '" target="_blank" rel="noopener">Abrir hoja</a>' +
+        '<a href="' + esc(r.pdf) + '" target="_blank" rel="noopener">Descargar PDF</a>' +
+        '<a href="' + esc(r.xlsx) + '" target="_blank" rel="noopener">Descargar Excel</a></div>');
+      toast('Reporte generado ✓');
+    } catch (e) {
+      toast(mensajeError(e), 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Generar';
+    }
+  }
+
+  function moverMes(delta) {
+    const p = (val('mes') || iso(new Date()).slice(0, 7)).split('-');
+    const d = new Date(+p[0], +p[1] - 1 + delta, 1);
+    $('#mes').value = iso(d).slice(0, 7);
+    cargarReporte();
+  }
+
+  /* ───────── Navegación ───────── */
+  function mostrarVista(v) {
+    $$('.vista').forEach((x) => x.classList.toggle('activa', x.id === 'vista-' + v));
+    $$('.tab').forEach((x) => x.classList.toggle('activa', x.dataset.vista === v));
+    if (v === 'reportes' && !S.reporte) cargarReporte();
+  }
+
+  /* ───────── Inicio ───────── */
+  function enlazar() {
+    $$('.tab').forEach((b) => b.addEventListener('click', () => mostrarVista(b.dataset.vista)));
+    $('#form').addEventListener('submit', guardar);
+    $('#btnCancelar').addEventListener('click', () => { limpiarForm(false); mostrarVista('recientes'); });
+    $('#btnEliminar').addEventListener('click', eliminar);
+    $('#fecha').addEventListener('change', cargarEventos);
+    $('#paciente').addEventListener('change', () => { revisarPaciente(); actualizarVista(); });
+    $('#paciente').addEventListener('input', () => { if (!val('paciente')) revisarPaciente(); });
+    $('#paciente2').addEventListener('input', actualizarVista);
+    ['totalSeguro', 'montoAseguradora'].forEach((id) => $('#' + id).addEventListener('input', repartirPagos));
+    ['pago1', 'pago2'].forEach((id) => $('#' + id).addEventListener('input', actualizarResumen));
+    $('#dosPagos').addEventListener('change', () => { actualizarVista(); repartirPagos(); });
+    $('#btnExportar').addEventListener('click', exportar);
+    $('#mes').addEventListener('change', cargarReporte);
+    $('#mesAnt').addEventListener('click', () => moverMes(-1));
+    $('#mesSig').addEventListener('click', () => moverMes(1));
+  }
+
+  function construirChips() {
+    const c = S.cats;
+    chips('tipo', c.tipos.map((t) => t.nombre), () => {
+      S.tipoManual = true;
+      actualizarVista();
+      repartirPagos();
+    });
+    chips('ubicacion', c.ubicaciones.map((u) => u.nombre), () => { actualizarVista(); repartirPagos(); });
+    chips('conSeguro', ['No', 'Sí'], (v) => {
+      if (v === 'Sí') {
+        if (!getChip('aseguradora') && c.aseguradoras.length === 1) elegirAseguradora(c.aseguradoras[0].nombre);
+        if (!getChip('estado')) setChip('estado', 'Pendiente');
+        if (val('totalSeguro') === '') { $('#pago1').value = ''; $('#pago2').value = ''; }
+      }
+      actualizarVista();
+      repartirPagos();
+      if (v === 'Sí') $('#totalSeguro').focus();
+    });
+    chips('aseguradora', c.aseguradoras.map((a) => a.nombre), (v) => { elegirAseguradora(v); repartirPagos(); });
+    chips('estado', c.estados);
+    chips('forma1', c.formas);
+    chips('forma2', c.formas);
+    setChip('conSeguro', 'No');
+  }
+
+  /** Al elegir aseguradora se propone su monto fijo (editable). */
+  function elegirAseguradora(nombre) {
+    setChip('aseguradora', nombre);
+    const a = S.cats.aseguradoras.find((x) => x.nombre === nombre);
+    if (a && a.monto !== null && a.monto !== undefined) $('#montoAseguradora').value = a.monto;
+  }
+
+  async function iniciar() {
+    enlazar();
+    try {
+      const b = await api('getBootstrap');
+      S.cats = b.cats;
+      S.tarifas = b.tarifas;
+      S.recientes = b.recientes;
+      cargarPacientes(b.pacientes);
+      construirChips();
+      opcionesExport();
+      const hora = new Date().getHours();
+      const saludo = hora < 12 ? 'Buenos días' : hora < 18 ? 'Buenas tardes' : 'Buenas noches';
+      $('#saludo').textContent = saludo + (b.nutricionista ? ', ' + b.nutricionista : '') + ' · ' + fechaLarga(b.hoy);
+      $('#fecha').value = b.hoy;
+      $('#mes').value = b.hoy.slice(0, 7);
+      pintarRecientes();
+      actualizarVista();
+      cargarEventos();
+    } catch (e) {
+      toast('No se pudo cargar: ' + mensajeError(e), 'error');
+    } finally {
+      $('#cargando').classList.add('listo');
+    }
+  }
+
+  iniciar();
+})();
+</script>

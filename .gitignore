@@ -1,0 +1,4 @@
+node_modules/
+dev/preview.html
+.clasp.json
+.clasprc.json

@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Montserrat:wght@400;500;600;700&family=Poppins:wght@600;700;800&display=swap" rel="stylesheet">
+  <?!= include('styles'); ?>
+</head>
+<body>
+  <div class="blob blob-tr" aria-hidden="true"></div>
+  <div class="blob blob-bl" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="marca">
+      <div class="logo"><span class="logo-1">Hábitos</span><span class="logo-2">con propósito</span></div>
+      <p class="saludo" id="saludo"></p>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab activa" data-vista="registrar" role="tab">Registrar</button>
+      <button class="tab" data-vista="recientes" role="tab">Recientes</button>
+      <button class="tab" data-vista="reportes" role="tab">Reportes</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- ───────────── Registrar ───────────── -->
+    <section id="vista-registrar" class="vista activa">
+      <h1 class="titulo">
+        <svg class="chispas" viewBox="0 0 44 44" aria-hidden="true"><g stroke="currentColor" stroke-width="5" stroke-linecap="round"><line x1="31" y1="4" x2="33" y2="15"/><line x1="12" y1="12" x2="20" y2="20"/><line x1="4" y1="33" x2="16" y2="32"/></g></svg>
+        <span id="tituloForm">Nueva</span> <span class="pill">consulta</span>
+      </h1>
+
+      <div class="card" id="cardAgenda">
+        <div class="card-head">
+          <h2>Citas del día</h2>
+          <span class="sutil" id="agendaFecha"></span>
+        </div>
+        <div class="eventos" id="eventos"><p class="vacio">Cargando…</p></div>
+      </div>
+
+      <form id="form" autocomplete="off" novalidate>
+        <div class="card">
+          <h2>Cita</h2>
+          <div class="fila2">
+            <label class="campo"><span>Fecha</span><input type="date" id="fecha" required></label>
+            <label class="campo"><span>Hora</span><input type="time" id="hora"></label>
+          </div>
+          <div class="campo">
+            <span>Tipo de cita</span>
+            <div class="chips" data-name="tipo" id="chipsTipo"></div>
+          </div>
+          <div class="campo">
+            <span>Ubicación</span>
+            <div class="chips" data-name="ubicacion"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2 id="tituloPacientes">Paciente</h2>
+          <label class="campo">
+            <span id="lblPaciente">Nombre completo</span>
+            <input type="text" id="paciente" list="listaPacientes" placeholder="Nombre y apellidos" autocapitalize="words">
+            <small class="ayuda" id="infoPaciente"></small>
+          </label>
+          <label class="campo oculto" id="grupoPaciente2">
+            <span>Nombre de la segunda persona</span>
+            <input type="text" id="paciente2" list="listaPacientes" placeholder="Nombre y apellidos" autocapitalize="words">
+          </label>
+          <datalist id="listaPacientes"></datalist>
+        </div>
+
+        <div class="card">
+          <h2>Seguro médico</h2>
+          <div class="campo">
+            <span>¿Aplica seguro?</span>
+            <div class="chips chips-sino" data-name="conSeguro"></div>
+          </div>
+          <div id="bloqueSeguro" class="oculto">
+            <div class="campo">
+              <span>Aseguradora</span>
+              <div class="chips" data-name="aseguradora"></div>
+            </div>
+            <div class="fila2">
+              <label class="campo"><span>Total de la consulta con seguro</span>
+                <div class="monto"><input type="number" id="totalSeguro" inputmode="numeric" min="0" step="1" placeholder="0"></div>
+              </label>
+              <label class="campo"><span>Paga la aseguradora</span>
+                <div class="monto"><input type="number" id="montoAseguradora" inputmode="numeric" min="0" step="1" placeholder="0"></div>
+              </label>
+            </div>
+            <div class="campo">
+              <span>Estado del cobro a la aseguradora</span>
+              <div class="chips" data-name="estado"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>Pago del paciente</h2>
+            <span class="sutil" id="hintTarifa"></span>
+          </div>
+          <div class="pago">
+            <label class="campo"><span id="lblPago1">Monto</span>
+              <div class="monto"><input type="number" id="pago1" inputmode="numeric" min="0" step="1" placeholder="0"></div>
+            </label>
+            <div class="campo">
+              <span>Forma de pago</span>
+              <div class="chips chips-sm" data-name="forma1"></div>
+            </div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="dosPagos">
+            <span class="switch-ui" aria-hidden="true"></span>
+            <span id="lblDosPagos">Dividir en dos pagos</span>
+          </label>
+          <div class="pago oculto" id="grupoPago2">
+            <label class="campo"><span id="lblPago2">Segundo pago</span>
+              <div class="monto"><input type="number" id="pago2" inputmode="numeric" min="0" step="1" placeholder="0"></div>
+            </label>
+            <div class="campo">
+              <span>Forma de pago</span>
+              <div class="chips chips-sm" data-name="forma2"></div>
+            </div>
+          </div>
+          <p class="aviso oculto" id="avisoMonto"></p>
+        </div>
+
+        <div class="card">
+          <label class="campo"><span>Notas <em>(opcional)</em></span>
+            <textarea id="notas" rows="2" placeholder="Algo que quiera recordar de esta consulta"></textarea>
+          </label>
+        </div>
+
+        <div class="barra-guardar">
+          <div class="resumen" id="resumen">
+            <span class="resumen-total" id="resumenTotal">₡0</span>
+            <span class="resumen-det" id="resumenDet">Total facturado</span>
+          </div>
+          <div class="acciones">
+            <button type="button" class="btn btn-sec oculto" id="btnCancelar">Cancelar</button>
+            <button type="submit" class="btn btn-pri" id="btnGuardar">Guardar</button>
+          </div>
+        </div>
+        <button type="button" class="btn-link peligro oculto" id="btnEliminar">Eliminar este registro</button>
+      </form>
+    </section>
+
+    <!-- ───────────── Recientes ───────────── -->
+    <section id="vista-recientes" class="vista">
+      <h1 class="titulo">
+        <svg class="chispas" viewBox="0 0 44 44" aria-hidden="true"><g stroke="currentColor" stroke-width="5" stroke-linecap="round"><line x1="31" y1="4" x2="33" y2="15"/><line x1="12" y1="12" x2="20" y2="20"/><line x1="4" y1="33" x2="16" y2="32"/></g></svg>
+        Últimos <span class="pill">registros</span>
+      </h1>
+      <p class="sutil">Los 10 registros más recientes. Toque uno para editarlo.</p>
+      <div id="listaRecientes" class="lista"></div>
+    </section>
+
+    <!-- ───────────── Reportes ───────────── -->
+    <section id="vista-reportes" class="vista vista-ancha">
+      <div class="rep-head">
+        <h1 class="titulo">
+          <svg class="chispas" viewBox="0 0 44 44" aria-hidden="true"><g stroke="currentColor" stroke-width="5" stroke-linecap="round"><line x1="31" y1="4" x2="33" y2="15"/><line x1="12" y1="12" x2="20" y2="20"/><line x1="4" y1="33" x2="16" y2="32"/></g></svg>
+          Reporte <span class="pill" id="repEtiqueta">del mes</span>
+        </h1>
+        <div class="rep-mes">
+          <button type="button" class="btn-icono" id="mesAnt" aria-label="Mes anterior">‹</button>
+          <input type="month" id="mes">
+          <button type="button" class="btn-icono" id="mesSig" aria-label="Mes siguiente">›</button>
+        </div>
+      </div>
+
+      <div class="kpis" id="kpis"></div>
+
+      <div class="grid2">
+        <div class="card">
+          <h2>Por ubicación</h2>
+          <div class="tabla-wrap" id="tablaUbic"></div>
+        </div>
+        <div class="card">
+          <h2>Aseguradoras</h2>
+          <div class="tabla-wrap" id="tablaAseg"></div>
+        </div>
+        <div class="card">
+          <h2>Por tipo de cita</h2>
+          <div class="tabla-wrap" id="tablaTipo"></div>
+        </div>
+        <div class="card">
+          <h2>Pagos por forma de pago</h2>
+          <div class="tabla-wrap" id="tablaForma"></div>
+        </div>
+      </div>
+
+      <div class="card card-export">
+        <h2>Exportar reporte</h2>
+        <p class="sutil">Crea una hoja nueva en su Drive (carpeta de reportes) lista para enviar en PDF o Excel. Solo incluye los datos del reporte, no toda la bitácora.</p>
+        <div class="export-form">
+          <label class="campo"><span>Reporte</span><select id="expTipo"></select></label>
+          <label class="check"><input type="checkbox" id="expNombres" checked> Incluir nombres de pacientes</label>
+          <button type="button" class="btn btn-pri" id="btnExportar">Generar</button>
+        </div>
+        <div id="expResultados" class="export-res"></div>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div class="modal oculto" id="modal" role="dialog" aria-modal="true">
+    <div class="modal-caja">
+      <p id="modalTexto"></p>
+      <div class="acciones">
+        <button type="button" class="btn btn-sec" id="modalNo">Cancelar</button>
+        <button type="button" class="btn btn-pri" id="modalSi">Sí</button>
+      </div>
+    </div>
+  </div>
+  <div class="cargando" id="cargando"><div class="spinner"></div></div>
+
+  <?!= include('app'); ?>
+</body>
+</html>

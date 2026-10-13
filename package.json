@@ -1,0 +1,10 @@
+{
+  "name": "habitos-con-proposito-bitacora",
+  "private": true,
+  "description": "Bitácora de consultas de Hábitos con propósito (Google Apps Script + Sheets)",
+  "scripts": {
+    "test": "TZ=America/Costa_Rica node test/test.js",
+    "preview": "TZ=America/Costa_Rica node dev/preview.js",
+    "push": "clasp push"
+  }
+}
