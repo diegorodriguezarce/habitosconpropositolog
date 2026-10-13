@@ -11,6 +11,8 @@ App web (Google Apps Script + Google Sheets) para que Moni registre cada consult
 
 Solo la usa la administradora: la app corre con su cuenta y nadie más tiene acceso.
 
+Próximas mejoras: ver [TODO.md](TODO.md).
+
 ---
 
 ## Estructura
