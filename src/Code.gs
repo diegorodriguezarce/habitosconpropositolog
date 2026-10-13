@@ -23,8 +23,6 @@ const ESTADOS_ASEGURADORA = ['Pendiente', 'Facturado', 'Pagado'];
 const BASES_COMISION = ['Total facturado', 'Pago paciente'];
 const NO_APLICA = 'No aplica';
 const DESCUENTO_OTRO = 'Otro';
-/** Quién recibe el dinero de un pago: la nutricionista o la sede (p. ej. datáfono de DS). */
-const RECEPTORES = ['Nutricionista', 'Sede'];
 
 const COLOR = {
   crema: '#F7F2E8',
@@ -126,16 +124,14 @@ function setup() {
     sh.getRange(1, 4).setNote('"Total facturado" = paciente + aseguradora. "Pago paciente" = solo lo que paga el paciente.');
   });
 
-  crearCatalogo_(ss, HOJAS.aseguradoras, ['Aseguradora', 'Monto aseguradora', 'Monto paciente', 'Ubicaciones', 'Excepto tipos', 'Lo cobra', 'Activa'], [
-    ['Sana Sana', 8500, 16000, 'Escazú', 'Pareja primera vez, Pareja control, Mediciones', 'Sede', 'Sí'],
-  ], [160, 140, 130, 160, 300, 110, 70], function (sh) {
+  crearCatalogo_(ss, HOJAS.aseguradoras, ['Aseguradora', 'Monto aseguradora', 'Monto paciente', 'Ubicaciones', 'Excepto tipos', 'Activa'], [
+    ['Sana Sana', 8500, 16000, 'Escazú', 'Pareja primera vez, Pareja control, Mediciones', 'Sí'],
+  ], [160, 140, 130, 160, 300, 70], function (sh) {
     sh.getRange(2, 2, sh.getMaxRows() - 1, 2).setNumberFormat(MONEDA);
     sh.getRange(1, 2).setNote('Monto fijo que paga la aseguradora por consulta. En la app se puede editar.');
     sh.getRange(1, 3).setNote('Monto que se le cobra al paciente cuando usa este seguro. En la app se puede editar.');
     sh.getRange(1, 4).setNote('Ubicaciones donde se acepta, separadas por coma. Vacío = todas.');
     sh.getRange(1, 5).setNote('Tipos de cita en los que NO se acepta, separados por coma.');
-    validarColumna_(sh, 'Lo cobra', RECEPTORES,
-      '"Sede" = el monto de la aseguradora entra por la sede (p. ej. datáfono de DS) y se descuenta de lo que se le paga al encargado.');
   }, { 'Monto por consulta': 'Monto aseguradora' });
 
   crearCatalogo_(ss, HOJAS.descuentos, ['Descuento', '% descuento', 'Ubicaciones', 'Excepto tipos', 'Activo'], [
@@ -146,13 +142,10 @@ function setup() {
     sh.getRange(1, 4).setNote('Tipos de cita a los que NO aplica, separados por coma.');
   });
 
-  crearCatalogo_(ss, HOJAS.formas, ['Forma de pago', 'Lo recibe', 'Activa'], [
-    ['SINPE', 'Nutricionista', 'Sí'],
-    ['Tarjeta', 'Nutricionista', 'Sí'],
-  ], [160, 120, 70], function (sh) {
-    validarColumna_(sh, 'Lo recibe', RECEPTORES,
-      '"Sede" = ese pago entra por la sede (p. ej. "Datáfono DS") y se descuenta de lo que se le paga al encargado.');
-  });
+  crearCatalogo_(ss, HOJAS.formas, ['Forma de pago', 'Activa'], [
+    ['SINPE', 'Sí'],
+    ['Tarjeta', 'Sí'],
+  ], [160, 70]);
 
   const config = crearCatalogo_(ss, HOJAS.config, ['Clave', 'Valor', 'Descripción'], CONFIG_INICIAL, [200, 260, 420]);
   asegurarClavesConfig_(config);
@@ -264,16 +257,6 @@ function completarCatalogo_(sh, headers, iniciales, renombrar) {
     });
   });
   sh.getRange(1, 1, v.length, cab.length).setValues(v);
-}
-
-/** Lista desplegable y nota en la columna con ese encabezado (si existe). */
-function validarColumna_(sh, header, opciones, nota) {
-  const cab = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(function (h) { return String(h).trim(); });
-  const col = cab.indexOf(header) + 1;
-  if (!col) return;
-  sh.getRange(2, col, sh.getMaxRows() - 1, 1).setDataValidation(
-    SpreadsheetApp.newDataValidation().requireValueInList(opciones, true).build());
-  sh.getRange(1, col).setNote(nota);
 }
 
 /** Agrega a Config las claves nuevas que no existan (sin tocar valores). */
@@ -671,7 +654,7 @@ function normalizarRegistro_(d, cats, tarifas) {
     }
     if (desc && tarifa !== '') montoDescuento = Math.round(tarifa * desc.porcentaje);
     if (!desc) {
-      // Descuento puntual (fuera del catálogo): el monto se digita a mano.
+      // Descuento puntual ("Otro", fuera del catálogo): el monto se digita a mano.
       montoDescuento = monto_(d.montoDescuento);
       if (isNaN(montoDescuento) || !montoDescuento) throw new Error('Falta completar: monto del descuento.');
     }
@@ -848,7 +831,6 @@ function catalogos_() {
         montoPaciente: montoONull(r['Monto paciente']),
         ubicaciones: listaConfig_(r['Ubicaciones']),
         exceptoTipos: listaConfig_(r['Excepto tipos']),
-        loCobra: normTxt_(r['Lo cobra']) === 'sede' ? 'Sede' : 'Nutricionista',
       };
     });
   const descuentos = leerTabla_(HOJAS.descuentos)
@@ -861,14 +843,12 @@ function catalogos_() {
         exceptoTipos: listaConfig_(r['Excepto tipos']),
       };
     });
-  const filasFormas = leerTabla_(HOJAS.formas).filter(function (r) { return r['Forma de pago'] && activo(r, 'Activa'); });
-  const formas = filasFormas.map(function (r) { return String(r['Forma de pago']).trim(); });
-  const formasSede = filasFormas
-    .filter(function (r) { return normTxt_(r['Lo recibe']) === 'sede'; })
+  const formas = leerTabla_(HOJAS.formas)
+    .filter(function (r) { return r['Forma de pago'] && activo(r, 'Activa'); })
     .map(function (r) { return String(r['Forma de pago']).trim(); });
   return {
     tipos: tipos, ubicaciones: ubicaciones, aseguradoras: aseguradoras, descuentos: descuentos,
-    formas: formas, formasSede: formasSede, estados: ESTADOS_ASEGURADORA,
+    formas: formas, estados: ESTADOS_ASEGURADORA,
   };
 }
 
@@ -1166,9 +1146,7 @@ function sugerirDesdeEvento_(titulo, lugar, cats) {
 /* ───────────────────────── Reportes ───────────────────────── */
 
 function resumen_(regs, cats) {
-  const tot = { consultas: 0, personas: 0, pagoPacientes: 0, aseguradoras: 0, facturado: 0, descuentos: 0, comisiones: 0,
-    cobradoSede: 0, porCobrar: 0 };
-  const cobradoSede = cobroSede_(cats);
+  const tot = { consultas: 0, personas: 0, pagoPacientes: 0, aseguradoras: 0, facturado: 0, descuentos: 0, comisiones: 0, porCobrar: 0 };
   const porUbic = {};
   const porAseg = {};
   const porTipo = {};
@@ -1180,8 +1158,6 @@ function resumen_(regs, cats) {
   regs.forEach(function (r) {
     const personas = r.paciente2 ? 2 : 1;
     const comision = comisionDe_(r, cfgUbic);
-    const deSede = cobradoSede(r);
-    tot.cobradoSede += deSede;
     tot.consultas++;
     tot.personas += personas;
     tot.pagoPacientes += r.totalPaciente;
@@ -1192,9 +1168,8 @@ function resumen_(regs, cats) {
 
     const nombreU = r.ubicacion || '(sin ubicación)';
     const u = obtener(porUbic, nombreU, function () {
-      return { nombre: nombreU, consultas: 0, personas: 0, pagoPacientes: 0, aseguradoras: 0, facturado: 0, montoBase: 0, comision: 0, cobradoSede: 0 };
+      return { nombre: nombreU, consultas: 0, personas: 0, pagoPacientes: 0, aseguradoras: 0, facturado: 0, montoBase: 0, comision: 0 };
     });
-    u.cobradoSede += deSede;
     u.consultas++;
     u.personas += personas;
     u.pagoPacientes += r.totalPaciente;
@@ -1205,8 +1180,7 @@ function resumen_(regs, cats) {
 
     const enc = (cfgUbic[r.ubicacion] || {}).encargado;
     if (enc) {
-      const e = obtener(porEnc, enc, function () { return { nombre: enc, ubicaciones: [], consultas: 0, facturado: 0, comision: 0, cobradoSede: 0 }; });
-      e.cobradoSede += deSede;
+      const e = obtener(porEnc, enc, function () { return { nombre: enc, ubicaciones: [], consultas: 0, facturado: 0, comision: 0 }; });
       if (e.ubicaciones.indexOf(r.ubicacion) < 0) e.ubicaciones.push(r.ubicacion);
       e.consultas++;
       e.facturado += r.totalFacturado;
@@ -1245,16 +1219,14 @@ function resumen_(regs, cats) {
       u.porcentaje = cfg.porcentaje || 0;
       u.base = cfg.base || BASES_COMISION[0];
       u.nutricionista = u.facturado - u.comision;
-      u.saldo = u.comision - u.cobradoSede;
       return u;
     });
   tot.neto = tot.facturado - tot.comisiones;
-  tot.saldoColaboradoras = tot.comisiones - tot.cobradoSede;
 
   return {
     totales: tot,
     ubicaciones: ubicaciones,
-    encargados: ordenar_(porEnc, []).map(function (e) { e.saldo = e.comision - e.cobradoSede; return e; }),
+    encargados: ordenar_(porEnc, []),
     aseguradoras: ordenar_(porAseg, cats.aseguradoras.map(function (a) { return a.nombre; })),
     tipos: ordenar_(porTipo, cats.tipos.map(function (t) { return t.nombre; })),
     formas: ordenar_(porForma, cats.formas),
@@ -1271,21 +1243,6 @@ function baseComision_(r, cfgUbic) {
   const cfg = cfgUbic[r.ubicacion];
   if (!cfg) return 0;
   return cfg.base === 'Pago paciente' ? r.totalPaciente : r.totalFacturado;
-}
-
-/**
- * Función que devuelve cuánto de un registro entró por la sede (y no por la nutricionista):
- * pagos con formas de pago "Lo recibe = Sede" y montos de aseguradoras "Lo cobra = Sede".
- */
-function cobroSede_(cats) {
-  const formas = {};
-  (cats.formasSede || []).forEach(function (f) { formas[f] = true; });
-  const asegs = {};
-  cats.aseguradoras.forEach(function (a) { if (a.loCobra === 'Sede') asegs[a.nombre] = true; });
-  return function (r) {
-    return (formas[r.forma1] ? r.pago1 : 0) + (formas[r.forma2] ? r.pago2 : 0) +
-      (r.conSeguro && asegs[r.aseguradora] ? r.montoAseguradora : 0);
-  };
 }
 
 /** Lo que se le paga al encargado de la ubicación por esta consulta. */
@@ -1327,23 +1284,14 @@ function reporteSede_(w, regs, cats, opc) {
   w.tabla(headers, rows, formatos, total);
 
   w.subtitulo('Liquidación');
-  const pares = [
+  w.pares([
     ['Consultas atendidas', ub.consultas, '0'],
     ['Total facturado', ub.facturado || 0, MONEDA],
     ['Base de cálculo', u.base, '@'],
     ['Porcentaje acordado', u.porcentaje, '0.##%'],
-    ['Comisión' + (u.encargado ? ' de ' + u.encargado : ''), ub.comision || 0, MONEDA],
     ['Monto para ' + nombreNutricionista_(), ub.nutricionista || 0, MONEDA],
-  ];
-  if (ub.cobradoSede) pares.push(['Ya cobrado por la sede (datáfono / aseguradora)', -ub.cobradoSede, MONEDA]);
-  w.pares(pares);
-  destacarSaldo_(w, u.encargado || u.nombre, (ub.comision || 0) - (ub.cobradoSede || 0));
-}
-
-/** Saldo positivo: se le paga al encargado. Negativo: la sede le debe a la nutricionista. */
-function destacarSaldo_(w, quien, saldo) {
-  if (saldo >= 0) w.destacado('Saldo a pagar a ' + quien, saldo, MONEDA);
-  else w.destacado(quien + ' le debe a ' + nombreNutricionista_(), -saldo, MONEDA);
+  ]);
+  w.destacado('Monto a pagar' + (u.encargado ? ' a ' + u.encargado : ''), ub.comision || 0, MONEDA);
 }
 
 /** Liquidación de una persona que cobra en una o varias ubicaciones (p. ej. Andrea: Escazú + Domicilio). */
@@ -1355,23 +1303,19 @@ function reporteEncargado_(w, regs, cats, opc) {
   const conNombres = opc.nombres !== false;
 
   w.subtitulo('Detalle de consultas');
-  const cobradoSede = cobroSede_(cats);
   const headers = ['Fecha', 'Ubicación'].concat(conNombres ? ['Paciente(s)'] : [])
-    .concat(['Tipo de cita', 'Total facturado', '%', 'Comisión', 'Ya cobrado por la sede']);
-  const formatos = [FECHA, '@'].concat(conNombres ? ['@'] : []).concat(['@', MONEDA, '0.##%', MONEDA, MONEDA]);
+    .concat(['Tipo de cita', 'Total facturado', '%', 'A pagar']);
+  const formatos = [FECHA, '@'].concat(conNombres ? ['@'] : []).concat(['@', MONEDA, '0.##%', MONEDA]);
   let facturado = 0;
   let pagar = 0;
-  let cobrado = 0;
   const rows = filas.map(function (r) {
     const c = comisionDe_(r, cfgUbic);
-    const s = cobradoSede(r);
     facturado += r.totalFacturado;
     pagar += c;
-    cobrado += s;
     return [aFecha_(r.fecha), r.ubicacion].concat(conNombres ? [nombres_(r)] : [])
-      .concat([r.tipo + (r.descuento ? ' (' + r.descuento + ')' : ''), r.totalFacturado, cfgUbic[r.ubicacion].porcentaje, c, s || '']);
+      .concat([r.tipo + (r.descuento ? ' (' + r.descuento + ')' : ''), r.totalFacturado, cfgUbic[r.ubicacion].porcentaje, c]);
   });
-  const total = ['Total', ''].concat(conNombres ? [''] : []).concat([filas.length + ' consultas', facturado, '', pagar, cobrado]);
+  const total = ['Total', ''].concat(conNombres ? [''] : []).concat([filas.length + ' consultas', facturado, '', pagar]);
   w.tabla(headers, rows, formatos, total);
 
   w.subtitulo('Resumen por ubicación');
@@ -1380,13 +1324,7 @@ function reporteEncargado_(w, regs, cats, opc) {
     return [u.nombre + ' · ' + u.consultas + ' consultas · ' + Math.round(u.porcentaje * 100) + '% de ' + formatoColones_(u.facturado),
       u.comision, MONEDA];
   }));
-  if (cobrado) {
-    w.pares([
-      ['Comisión total', pagar, MONEDA],
-      ['Ya cobrado por la sede (datáfono / aseguradora)', -cobrado, MONEDA],
-    ]);
-  }
-  destacarSaldo_(w, opc.filtro, pagar - cobrado);
+  w.destacado('Total a pagar a ' + opc.filtro, pagar, MONEDA);
 }
 
 function reporteAseguradora_(w, regs, opc) {
@@ -1423,9 +1361,7 @@ function reporteGeneral_(w, regs, cats) {
     ['Monto aseguradoras', t.aseguradoras, MONEDA],
     ['Total facturado', t.facturado, MONEDA],
     ['Descuentos aplicados', t.descuentos, MONEDA],
-    ['Comisiones de colaboradoras', t.comisiones, MONEDA],
-    ['Ya cobrado por las sedes', t.cobradoSede, MONEDA],
-    ['Saldo a pagar a colaboradoras', t.saldoColaboradoras, MONEDA],
+    ['Pagos a colaboradoras', t.comisiones, MONEDA],
     ['Por cobrar a aseguradoras', t.porCobrar, MONEDA],
   ]);
   w.destacado('Monto para ' + nutri, t.neto, MONEDA);
@@ -1439,12 +1375,10 @@ function reporteGeneral_(w, regs, cats) {
     ['Total', t.consultas, t.pagoPacientes, t.aseguradoras, t.facturado, '', t.comisiones, t.neto]);
 
   w.subtitulo('Pagos a colaboradoras');
-  w.tabla(['Persona', 'Ubicaciones', 'Consultas', 'Total facturado', 'Comisión', 'Ya cobrado', 'Saldo a pagar'],
-    res.encargados.map(function (e) {
-      return [e.nombre, e.ubicaciones.join(', '), e.consultas, e.facturado, e.comision, e.cobradoSede, e.saldo];
-    }),
-    ['@', '@', '0', MONEDA, MONEDA, MONEDA, MONEDA],
-    ['Total', '', '', '', t.comisiones, t.cobradoSede, t.saldoColaboradoras]);
+  w.tabla(['Persona', 'Ubicaciones', 'Consultas', 'Total facturado', 'A pagar'],
+    res.encargados.map(function (e) { return [e.nombre, e.ubicaciones.join(', '), e.consultas, e.facturado, e.comision]; }),
+    ['@', '@', '0', MONEDA, MONEDA],
+    ['Total', '', '', '', t.comisiones]);
 
   w.subtitulo('Por aseguradora');
   w.tabla(['Aseguradora', 'Consultas', 'Monto', 'Pendiente', 'Facturado', 'Pagado'],

@@ -524,8 +524,7 @@
     $('#kpis').innerHTML = [
       ['Total facturado', colones(t.facturado), t.consultas + ' consultas · ' + t.personas + ' personas', true],
       ['Para ' + S.nutri, colones(t.neto), 'después de pagar a colaboradoras'],
-      ['Saldo a pagar a colaboradoras', colones(t.saldoColaboradoras),
-        t.cobradoSede ? 'Comisión ' + colones(t.comisiones) + ' − ya cobrado por sedes ' + colones(t.cobradoSede) : 'según % de cada sede'],
+      ['Pagos a colaboradoras', colones(t.comisiones), t.descuentos ? 'Descuentos dados: ' + colones(t.descuentos) : 'según % de cada sede'],
       ['Por cobrar a aseguradoras', colones(t.porCobrar), 'pendiente + facturado'],
     ].map((k) => '<div class="kpi' + (k[3] ? ' destacado' : '') + '"><div class="kpi-label">' + k[0] + '</div><div class="kpi-valor">' + k[1] + '</div><div class="kpi-sub">' + esc(k[2]) + '</div></div>').join('');
 
@@ -539,13 +538,8 @@
       ]),
       ['Total', t.consultas, colones(t.facturado), colones(t.comisiones), colones(t.neto)]) +
       (r.encargados.length ? '<div class="colab"><h3>A pagar por persona</h3>' + tabla(
-        [{ t: 'Persona' }, { t: 'Comisión', num: 1 }, { t: 'Ya cobró', num: 1 }, { t: 'Saldo', num: 1 }],
-        r.encargados.map((e) => [
-          esc(e.nombre) + '<span class="sub">' + esc(e.ubicaciones.join(' + ')) + ' · ' + e.consultas + ' consultas</span>',
-          colones(e.comision), e.cobradoSede ? colones(e.cobradoSede) : '—',
-          '<strong>' + (e.saldo < 0 ? 'Le debe ' + colones(-e.saldo) : colones(e.saldo)) + '</strong>',
-        ]),
-        ['Total', colones(t.comisiones), colones(t.cobradoSede), colones(t.saldoColaboradoras)]) +
+        [{ t: 'Persona' }, { t: 'Consultas', num: 1 }, { t: 'A pagar', num: 1 }],
+        r.encargados.map((e) => [esc(e.nombre) + '<span class="sub">' + esc(e.ubicaciones.join(' + ')) + '</span>', e.consultas, colones(e.comision)])) +
       '</div>' : '');
 
     $('#tablaAseg').innerHTML = tabla(
