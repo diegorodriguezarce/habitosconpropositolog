@@ -36,6 +36,41 @@
 
 - [ ] **Pasar a la cuenta de Hábitos:** copiar la hoja, borrar los registros de prueba, correr `setup`, publicar e importar la bitácora (ver README).
 - [ ] **Importar octubre:** volver a correr `tools/importar_bitacora.py` con el Excel actualizado.
-- [ ] **Hoja Pacientes:** teléfono, correo y cédula, tomados de la *Base de datos* del Excel; autocompletar en el formulario.
+- [ ] **Base de datos de pacientes en un Google Sheet aparte, sincronizada con todo.** Detalle en la sección 3.
 - [ ] **Reportes:** comparar entre meses, o un tablero en Looker Studio sobre la hoja Registros.
 - [ ] **Recordatorios:** avisar a los pacientes antes de la cita (correo o WhatsApp).
+
+## 3. Base de datos de pacientes (Sheet aparte, sincronizada)
+
+**Idea:** tener los pacientes en un Google Sheet **separado** de la bitácora. Así los datos personales quedan en un solo lugar, se pueden manejar aparte y la bitácora y los reportes no los exponen. La agenda, la bitácora y los reportes leen y escriben ahí.
+
+### Qué guarda
+- **ID de paciente**, nombre completo, teléfono, correo, cédula y fecha de nacimiento (opcional).
+- **Origen o referencia:** la marca y la visitadora que hoy están en la *Base de datos* del Excel, VOLK, etc.
+- Si es pareja, con quién viene (ID de la otra persona).
+- Aseguradora (Sana Sana) y número de afiliado, si aplica.
+- Consentimiento de uso de datos, con fecha.
+- Primera consulta, última consulta y total de consultas (calculados desde la bitácora).
+- Notas.
+
+### Cómo se sincroniza
+- **Agenda (autoservicio):** cuando un paciente pide cita, se busca por cédula, correo o teléfono.
+  - Si ya existe, se actualizan sus datos.
+  - Si no existe, se crea como paciente nuevo.
+  - Moni valida los cambios junto con la cita.
+- **Bitácora:** cada registro guarda el **ID de paciente**, además del nombre.
+  - El formulario autocompleta desde la base de pacientes, no desde los registros.
+  - *Primera vez / Control* se decide con el historial real del paciente.
+- **Calendar:** el evento lleva el ID del paciente en la descripción, para enlazar cita → solicitud → registro.
+- **Reportes:** siguen leyendo solo la bitácora. Los nombres en los PDF salen del ID, y se puede seguir eligiendo no incluirlos.
+
+### Migración
+- Importar la hoja *Base de datos* del Excel actual (nombre, número, correo, cédula, lugar, marca, visitadora).
+- Unir duplicados y variaciones de nombre (con y sin tilde, nombres incompletos como "Marie Paz Lemus").
+- Asignar el ID de paciente a los registros ya importados.
+
+### Por definir
+- **Dónde vive el Sheet de pacientes:** misma cuenta de Hábitos, con el ID guardado en Config.
+- **Quién más puede verlo:** por defecto solo Moni.
+- **Qué dato identifica a un paciente sin duda:** cédula o teléfono.
+- **Cuánto tiempo se guardan los datos:** y cómo borrar los de un paciente que lo pida.
