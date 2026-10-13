@@ -133,6 +133,9 @@
   }
   .chip:hover { border-color: var(--salvia); }
   .chip[aria-pressed=true] { background: var(--salvia); border-color: var(--salvia); font-weight: 700; }
+  .chip:disabled { opacity: .45; cursor: not-allowed; text-decoration: line-through; border-style: dashed; }
+  .chip:disabled:hover { border-color: var(--linea); }
+  .chip[hidden] { display: none; }
   .chips-sm .chip { padding: 6px 12px; font-size: 13.5px; }
   .chips-sino .chip { min-width: 70px; }
 
@@ -210,6 +213,9 @@
   .tag.Pendiente { background: var(--amarillo-suave); color: #6A5310; }
   .tag.Facturado { background: #E7ECF3; color: #34495E; }
   .tag.Pagado { background: var(--verde-claro); }
+  .tag.desc { background: #EFE3F3; color: #5B3B66; }
+  .colab { margin-top: 14px; padding-top: 12px; border-top: 1.5px dashed var(--linea); }
+  .colab h3 { font-family: var(--fuente-titulo); font-size: 14px; font-weight: 600; color: var(--oscuro); margin: 0 0 6px; }
 
   /* ───────── Reportes ───────── */
   .rep-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px 16px; }

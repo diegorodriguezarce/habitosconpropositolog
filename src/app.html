@@ -90,16 +90,69 @@
   const val = (id) => $('#' + id).value;
   const num = (id) => { const v = val(id); return v === '' ? 0 : Math.max(0, Math.round(Number(v)) || 0); };
 
+  const personas = () => (esPareja() ? 2 : 1);
+  const aplicaEn = (lista, u) => !lista || !lista.length || lista.some((x) => norm(x) === norm(u));
+  const pct = (p) => (Math.round(p * 1000) / 10).toLocaleString('es-CR') + '%';
+
+  /** Tarifa por persona: número, null (sin tarifa) o false (no se ofrece en esa ubicación). */
   function tarifaActual() {
     const fila = S.tarifas[getChip('tipo')];
     const v = fila ? fila[getChip('ubicacion')] : null;
+    if (v === false) return false;
     return v === null || v === undefined || v === '' ? null : Number(v);
   }
+  function tarifaLista() {
+    const t = tarifaActual();
+    return typeof t === 'number' ? t * personas() : null;
+  }
+  const aseguradorasAqui = () => S.cats.aseguradoras.filter((a) => aplicaEn(a.ubicaciones, getChip('ubicacion')));
+  function descuentosAqui() {
+    const u = getChip('ubicacion');
+    const t = norm(getChip('tipo'));
+    return S.cats.descuentos.filter((d) => aplicaEn(d.ubicaciones, u) && !d.exceptoTipos.some((x) => norm(x) === t));
+  }
+  function descuentoActual() {
+    if (conSeguro()) return null;
+    return descuentosAqui().find((d) => d.nombre === getChip('descuento')) || null;
+  }
 
-  /** Lo que se espera que pague el paciente: tarifa, o total con seguro − aseguradora. */
+  /** Lo que se espera que pague el paciente: tarifa (− descuento), o total con seguro − aseguradora. */
   function esperadoPaciente() {
     if (conSeguro()) return val('totalSeguro') === '' ? null : Math.max(0, num('totalSeguro') - num('montoAseguradora'));
-    return tarifaActual();
+    const t = tarifaLista();
+    if (t === null) return null;
+    const d = descuentoActual();
+    return d ? t - Math.round(t * d.porcentaje) : t;
+  }
+
+  /** Activa solo lo que aplica en la ubicación: tipos de cita, seguro y descuentos. */
+  function aplicarReglasUbicacion() {
+    const ubic = getChip('ubicacion');
+    $$('.chips[data-name=tipo] .chip').forEach((b) => {
+      const fila = S.tarifas[b.dataset.value];
+      b.disabled = !!ubic && !!fila && fila[ubic] === false;
+      b.title = b.disabled ? 'No se ofrece en ' + ubic : '';
+    });
+    const tipoBtn = $('.chips[data-name=tipo] .chip[aria-pressed=true]');
+    if (tipoBtn && tipoBtn.disabled) {
+      setChip('tipo', '');
+      $('#pago1').value = '';
+      $('#pago2').value = '';
+      toast(tipoBtn.dataset.value + ' no se ofrece en ' + ubic, 'error');
+    }
+
+    const asegs = aseguradorasAqui();
+    $('#cardSeguro').classList.toggle('oculto', !asegs.length);
+    if (!asegs.length && conSeguro()) setChip('conSeguro', 'No');
+    $$('.chips[data-name=aseguradora] .chip').forEach((b) => { b.hidden = !asegs.some((a) => a.nombre === b.dataset.value); });
+    if (getChip('aseguradora') && !asegs.some((a) => a.nombre === getChip('aseguradora'))) setChip('aseguradora', '');
+
+    const descs = conSeguro() ? [] : descuentosAqui();
+    $('#grupoDescuento').classList.toggle('oculto', !descs.length);
+    $$('.chips[data-name=descuento] .chip').forEach((b) => {
+      b.hidden = b.dataset.value !== 'Ninguno' && !descs.some((d) => d.nombre === b.dataset.value);
+    });
+    if (!descs.some((d) => d.nombre === getChip('descuento'))) setChip('descuento', 'Ninguno');
   }
 
   /** Reparte el monto esperado en uno o dos pagos (o redistribuye lo ya digitado). */
@@ -119,6 +172,7 @@
   }
 
   function actualizarVista() {
+    aplicarReglasUbicacion();
     const pareja = esPareja();
     const seguro = conSeguro();
     const dos = dosPagos();
@@ -145,7 +199,12 @@
     if (seguro) hint = 'Con seguro: total − aseguradora';
     else if (tipo && ubic) {
       const t = tarifaActual();
-      hint = t === null ? 'Sin tarifa en la hoja: digite el monto' : 'Tarifa ' + ubic + ': ' + colones(t);
+      const d = descuentoActual();
+      if (t === null) hint = 'Sin tarifa en la hoja: digite el monto';
+      else if (typeof t === 'number') {
+        hint = 'Tarifa ' + ubic + ': ' + colones(t) + (pareja ? ' por persona' : '') +
+          (d ? ' · ' + d.nombre + ' −' + pct(d.porcentaje) : '');
+      }
     }
     $('#hintTarifa').textContent = hint;
     actualizarResumen();
@@ -163,7 +222,7 @@
     if (esperado !== null && hayMonto && paciente !== esperado) {
       aviso.textContent = conSeguro()
         ? 'Los pagos (' + colones(paciente) + ') + aseguradora (' + colones(aseg) + ') no suman el total con seguro (' + colones(num('totalSeguro')) + ').'
-        : 'El monto (' + colones(paciente) + ') es distinto a la tarifa (' + colones(esperado) + '). Se guarda lo que digitó.';
+        : 'El monto (' + colones(paciente) + ') es distinto al esperado (' + colones(esperado) + '). Se guarda lo que digitó.';
       aviso.classList.remove('oculto');
     } else {
       aviso.classList.add('oculto');
@@ -262,6 +321,7 @@
       ubicacion: getChip('ubicacion'),
       conSeguro: seguro,
       aseguradora: seguro ? getChip('aseguradora') : '',
+      descuento: !seguro && getChip('descuento') !== 'Ninguno' ? getChip('descuento') : '',
       montoAseguradora: seguro ? num('montoAseguradora') : 0,
       estadoAseguradora: seguro ? getChip('estado') : '',
       dosPagos: dos,
@@ -330,6 +390,7 @@
     $$('.error').forEach((x) => x.classList.remove('error'));
     ['tipo', 'ubicacion', 'aseguradora', 'estado', 'forma1', 'forma2'].forEach((n) => setChip(n, ''));
     setChip('conSeguro', 'No');
+    setChip('descuento', 'Ninguno');
     $('#fecha').value = mantener && fecha ? fecha : iso(new Date());
     if (mantener && ubic) setChip('ubicacion', ubic);
     S.editId = null;
@@ -358,6 +419,7 @@
     setChip('tipo', reg.tipo);
     setChip('ubicacion', reg.ubicacion);
     setChip('conSeguro', reg.conSeguro ? 'Sí' : 'No');
+    setChip('descuento', reg.descuento || 'Ninguno');
     if (reg.conSeguro) {
       setChip('aseguradora', reg.aseguradora);
       $('#totalSeguro').value = reg.totalFacturado;
@@ -410,6 +472,7 @@
         '<span class="reg-nombre">' + esc(r.paciente) + (r.paciente2 ? ' y ' + esc(r.paciente2) : '') + '</span>' +
         '<span class="reg-meta">' + esc(r.tipo) + (formas ? ' · ' + esc(formas) : '') +
           (r.conSeguro ? '<span class="tag ' + esc(r.estadoAseguradora) + '">' + esc(r.aseguradora) + ' · ' + esc(r.estadoAseguradora) + '</span>' : '') +
+          (r.descuento ? '<span class="tag desc">' + esc(r.descuento) + '</span>' : '') +
         '</span>' +
         '<span class="reg-monto">' + colones(r.totalFacturado) + '</span>' +
       '</button>';
@@ -446,22 +509,27 @@
   function pintarReporte() {
     const r = S.reporte;
     const t = r.totales;
-    const pct = (p) => (Math.round(p * 1000) / 10).toLocaleString('es-CR') + '%';
     $('#repEtiqueta').textContent = r.etiqueta;
     $('#kpis').innerHTML = [
       ['Total facturado', colones(t.facturado), t.consultas + ' consultas · ' + t.personas + ' personas', true],
-      ['Pagado por pacientes', colones(t.pagoPacientes), 'efectivo, SINPE, tarjeta'],
-      ['Comisiones a sedes', colones(t.comisiones), 'Neto: ' + colones(t.neto)],
+      ['Para ' + S.nutri, colones(t.neto), 'después de pagar a colaboradoras'],
+      ['Pagos a colaboradoras', colones(t.comisiones), t.descuentos ? 'Descuentos dados: ' + colones(t.descuentos) : 'según % de cada sede'],
       ['Por cobrar a aseguradoras', colones(t.porCobrar), 'pendiente + facturado'],
     ].map((k) => '<div class="kpi' + (k[3] ? ' destacado' : '') + '"><div class="kpi-label">' + k[0] + '</div><div class="kpi-valor">' + k[1] + '</div><div class="kpi-sub">' + esc(k[2]) + '</div></div>').join('');
 
     $('#tablaUbic').innerHTML = tabla(
-      [{ t: 'Ubicación' }, { t: 'Consultas', num: 1 }, { t: 'Facturado', num: 1 }, { t: '%', num: 1 }, { t: 'A pagar sede', num: 1 }],
+      [{ t: 'Ubicación' }, { t: 'Consultas', num: 1 }, { t: 'Facturado', num: 1 }, { t: 'Sede', num: 1 }, { t: S.nutri, num: 1 }],
       r.ubicaciones.map((u) => [
         esc(u.nombre) + (u.encargado ? '<span class="sub">' + esc(u.encargado) + (u.base === 'Pago paciente' ? ' · sobre pago paciente' : '') + '</span>' : ''),
-        u.consultas, colones(u.facturado), pct(u.porcentaje), colones(u.comision),
+        u.consultas, colones(u.facturado),
+        colones(u.comision) + '<span class="sub">' + pct(u.porcentaje) + '</span>',
+        colones(u.nutricionista) + '<span class="sub">' + pct(1 - u.porcentaje) + '</span>',
       ]),
-      ['Total', t.consultas, colones(t.facturado), '', colones(t.comisiones)]);
+      ['Total', t.consultas, colones(t.facturado), colones(t.comisiones), colones(t.neto)]) +
+      (r.encargados.length ? '<div class="colab"><h3>A pagar por persona</h3>' + tabla(
+        [{ t: 'Persona' }, { t: 'Consultas', num: 1 }, { t: 'A pagar', num: 1 }],
+        r.encargados.map((e) => [esc(e.nombre) + '<span class="sub">' + esc(e.ubicaciones.join(' + ')) + '</span>', e.consultas, colones(e.comision)])) +
+      '</div>' : '');
 
     $('#tablaAseg').innerHTML = tabla(
       [{ t: 'Aseguradora' }, { t: 'Consultas', num: 1 }, { t: 'Pendiente', num: 1 }, { t: 'Facturado', num: 1 }, { t: 'Pagado', num: 1 }],
@@ -498,7 +566,13 @@
 
   function opcionesExport() {
     const ops = [['general|', 'General del mes (todas las sedes y aseguradoras)']];
-    S.cats.ubicaciones.forEach((u) => ops.push(['sede|' + u.nombre, 'Liquidación de sede · ' + u.nombre]));
+    const personasPago = [];
+    S.cats.ubicaciones.forEach((u) => { if (u.encargado && personasPago.indexOf(u.encargado) < 0) personasPago.push(u.encargado); });
+    personasPago.forEach((p) => {
+      const sedes = S.cats.ubicaciones.filter((u) => u.encargado === p).map((u) => u.nombre).join(' + ');
+      ops.push(['encargado|' + p, 'Liquidación de ' + p + ' (' + sedes + ')']);
+    });
+    S.cats.ubicaciones.forEach((u) => ops.push(['sede|' + u.nombre, 'Liquidación por sede · ' + u.nombre]));
     S.cats.aseguradoras.forEach((a) => ops.push(['aseguradora|' + a.nombre, 'Cobro a aseguradora · ' + a.nombre]));
     $('#expTipo').innerHTML = ops.map((o) => '<option value="' + esc(o[0]) + '">' + esc(o[1]) + '</option>').join('');
   }
@@ -567,7 +641,8 @@
     chips('ubicacion', c.ubicaciones.map((u) => u.nombre), () => { actualizarVista(); repartirPagos(); });
     chips('conSeguro', ['No', 'Sí'], (v) => {
       if (v === 'Sí') {
-        if (!getChip('aseguradora') && c.aseguradoras.length === 1) elegirAseguradora(c.aseguradoras[0].nombre);
+        const aqui = aseguradorasAqui();
+        if (!getChip('aseguradora') && aqui.length === 1) elegirAseguradora(aqui[0].nombre);
         if (!getChip('estado')) setChip('estado', 'Pendiente');
         if (val('totalSeguro') === '') { $('#pago1').value = ''; $('#pago2').value = ''; }
       }
@@ -576,17 +651,21 @@
       if (v === 'Sí') $('#totalSeguro').focus();
     });
     chips('aseguradora', c.aseguradoras.map((a) => a.nombre), (v) => { elegirAseguradora(v); repartirPagos(); });
+    chips('descuento', ['Ninguno'].concat(c.descuentos.map((d) => d.nombre)), () => { actualizarVista(); repartirPagos(); });
     chips('estado', c.estados);
     chips('forma1', c.formas);
     chips('forma2', c.formas);
     setChip('conSeguro', 'No');
+    setChip('descuento', 'Ninguno');
   }
 
-  /** Al elegir aseguradora se propone su monto fijo (editable). */
+  /** Al elegir aseguradora se proponen sus montos fijos (editables). */
   function elegirAseguradora(nombre) {
     setChip('aseguradora', nombre);
     const a = S.cats.aseguradoras.find((x) => x.nombre === nombre);
-    if (a && a.monto !== null && a.monto !== undefined) $('#montoAseguradora').value = a.monto;
+    if (!a || a.monto === null || a.monto === undefined) return;
+    $('#montoAseguradora').value = a.monto;
+    if (a.montoPaciente !== null && a.montoPaciente !== undefined) $('#totalSeguro').value = a.monto + a.montoPaciente;
   }
 
   async function iniciar() {
@@ -596,6 +675,7 @@
       S.cats = b.cats;
       S.tarifas = b.tarifas;
       S.recientes = b.recientes;
+      S.nutri = b.nutricionista || 'Nutricionista';
       cargarPacientes(b.pacientes);
       construirChips();
       opcionesExport();

@@ -13,6 +13,7 @@ const HOJAS = {
   tarifas: 'Tarifas',
   ubicaciones: 'Ubicaciones',
   aseguradoras: 'Aseguradoras',
+  descuentos: 'Descuentos',
   tipos: 'Tipos de cita',
   formas: 'Formas de pago',
   config: 'Config',
@@ -20,6 +21,7 @@ const HOJAS = {
 
 const ESTADOS_ASEGURADORA = ['Pendiente', 'Facturado', 'Pagado'];
 const BASES_COMISION = ['Total facturado', 'Pago paciente'];
+const NO_APLICA = 'No aplica';
 
 const COLOR = {
   crema: '#F7F2E8',
@@ -31,16 +33,26 @@ const COLOR = {
   amarillo: '#F4D978',
   amarilloSuave: '#FBF0C6',
   gris: '#939A85',
+  grisSuave: '#ECEAE4',
 };
 
 /** Claves de la hoja Config con su valor inicial. */
 const CONFIG_INICIAL = [
-  ['Nutricionista', 'Moni', 'Nombre que aparece en el saludo de la app.'],
+  ['Nutricionista', 'Moni', 'Nombre de la nutricionista (saludo de la app y su parte en los reportes).'],
   ['Calendarios de Google', '', 'IDs o nombres de calendarios a revisar, separados por coma (incluye calendarios suscritos por iCal). Vacío = calendario principal. "ninguno" = no leer Google.'],
   ['iCal (enlaces .ics)', '', 'Opcional: enlaces .ics / webcal:// de la agenda, separados por coma. Se leen directo (más actualizado que la suscripción de Google).'],
   ['Solo eventos que contengan', '', 'Opcional: muestra solo eventos cuyo título contenga este texto.'],
   ['Carpeta de reportes', 'Hábitos con propósito · Reportes', 'Carpeta de Drive donde se guardan los reportes exportados.'],
 ];
+
+/** Tarifas iniciales (por persona en pareja). Solo se cargan si la hoja Tarifas está vacía. */
+const TARIFAS_INICIALES = {
+  'Primera vez': { 'Escazú': 50000, 'Curridabat': 40000, 'Domicilio': 35000 },
+  'Control': { 'Escazú': 35000, 'Curridabat': 30000, 'Domicilio': 30000 },
+  'Pareja primera vez': { 'Escazú': 47000, 'Curridabat': 35000, 'Domicilio': 30000 },
+  'Pareja control': { 'Escazú': 32000, 'Curridabat': 27000, 'Domicilio': 25000 },
+  'Mediciones': { 'Escazú': 14000, 'Curridabat': NO_APLICA, 'Domicilio': 12000 },
+};
 
 const MONEDA = '"₡"#,##0';
 const FECHA = 'dd/mm/yyyy';
@@ -61,6 +73,8 @@ const COLUMNAS = [
   { key: 'conSeguro', header: 'Con seguro', ancho: 80, formato: '@' },
   { key: 'aseguradora', header: 'Aseguradora', ancho: 110, formato: '@' },
   { key: 'tarifa', header: 'Tarifa de lista', ancho: 100, formato: MONEDA },
+  { key: 'descuento', header: 'Descuento', ancho: 90, formato: '@' },
+  { key: 'montoDescuento', header: 'Monto descuento', ancho: 110, formato: MONEDA },
   { key: 'pago1', header: 'Pago 1', ancho: 90, formato: MONEDA },
   { key: 'forma1', header: 'Forma de pago 1', ancho: 110, formato: '@' },
   { key: 'pago2', header: 'Pago 2', ancho: 90, formato: MONEDA },
@@ -78,8 +92,9 @@ const COLUMNAS = [
 /* ───────────────────────── Setup de la hoja ───────────────────────── */
 
 /**
- * Crea las hojas que falten con encabezados, ejemplos y formato.
- * Es seguro correrlo varias veces: no borra datos existentes.
+ * Crea las hojas que falten con encabezados, valores iniciales y formato.
+ * Es seguro correrlo varias veces: no borra datos; solo agrega columnas que
+ * falten y completa celdas vacías de los valores iniciales.
  */
 function setup() {
   const ss = ss_();
@@ -91,29 +106,41 @@ function setup() {
     ['Pareja primera vez', 'Sí', 'Sí'],
     ['Pareja control', 'Sí', 'Sí'],
     ['Mediciones', 'No', 'Sí'],
-  ], [180, 90, 70]);
+  ], [180, 90, 70], function (sh) {
+    sh.getRange(1, 2).setNote('Sí = cita de dos personas: pide dos nombres y la tarifa se cobra por persona.');
+  });
 
   crearCatalogo_(ss, HOJAS.ubicaciones, ['Ubicación', 'Encargado / a quién se paga', '% comisión', 'Base de comisión', 'Activa'], [
-    ['Escazú', 'Andrea (DS · Diseñando tu Salud)', '', 'Total facturado', 'Sí'],
-    ['Curridabat', 'Encargado Curridabat', '', 'Total facturado', 'Sí'],
-    ['Domicilio', '', 0, 'Total facturado', 'Sí'],
+    ['Escazú', 'Andrea (DS · Diseñando tu Salud)', 0.4, 'Total facturado', 'Sí'],
+    ['Curridabat', 'Raque', 0.4, 'Total facturado', 'Sí'],
+    ['Domicilio', 'Andrea (DS · Diseñando tu Salud)', 0.2, 'Total facturado', 'Sí'],
   ], [130, 240, 100, 140, 70], function (sh) {
     sh.getRange(2, 3, sh.getMaxRows() - 1, 1).setNumberFormat('0.##%');
     sh.getRange(2, 4, sh.getMaxRows() - 1, 1).setDataValidation(
       SpreadsheetApp.newDataValidation().requireValueInList(BASES_COMISION, true).build());
-    sh.getRange(1, 3).setNote('Porcentaje que se le paga a la sede sobre la base de comisión. Ej.: 20%.');
+    sh.getRange(1, 2).setNote('Si el mismo nombre aparece en varias ubicaciones, los reportes suman lo que se le paga en total.');
+    sh.getRange(1, 3).setNote('Porcentaje que se le paga al encargado. El resto es de la nutricionista. Ej.: 40%.');
     sh.getRange(1, 4).setNote('"Total facturado" = paciente + aseguradora. "Pago paciente" = solo lo que paga el paciente.');
   });
 
-  crearCatalogo_(ss, HOJAS.aseguradoras, ['Aseguradora', 'Monto por consulta', 'Activa'], [
-    ['Sana Sana', '', 'Sí'],
-  ], [160, 140, 70], function (sh) {
-    sh.getRange(2, 2, sh.getMaxRows() - 1, 1).setNumberFormat(MONEDA);
-    sh.getRange(1, 2).setNote('Monto fijo que normalmente paga la aseguradora. En la app se puede editar en cada consulta.');
+  crearCatalogo_(ss, HOJAS.aseguradoras, ['Aseguradora', 'Monto aseguradora', 'Monto paciente', 'Ubicaciones', 'Activa'], [
+    ['Sana Sana', 8500, 16000, 'Escazú', 'Sí'],
+  ], [160, 140, 130, 200, 70], function (sh) {
+    sh.getRange(2, 2, sh.getMaxRows() - 1, 2).setNumberFormat(MONEDA);
+    sh.getRange(1, 2).setNote('Monto fijo que paga la aseguradora por consulta. En la app se puede editar.');
+    sh.getRange(1, 3).setNote('Monto que se le cobra al paciente cuando usa este seguro. En la app se puede editar.');
+    sh.getRange(1, 4).setNote('Ubicaciones donde se acepta, separadas por coma. Vacío = todas.');
+  }, { 'Monto por consulta': 'Monto aseguradora' });
+
+  crearCatalogo_(ss, HOJAS.descuentos, ['Descuento', '% descuento', 'Ubicaciones', 'Excepto tipos', 'Activo'], [
+    ['VOLK', 0.1, 'Domicilio', 'Mediciones', 'Sí'],
+  ], [140, 110, 200, 200, 70], function (sh) {
+    sh.getRange(2, 2, sh.getMaxRows() - 1, 1).setNumberFormat('0.##%');
+    sh.getRange(1, 3).setNote('Ubicaciones donde aplica, separadas por coma. Vacío = todas.');
+    sh.getRange(1, 4).setNote('Tipos de cita a los que NO aplica, separados por coma.');
   });
 
   crearCatalogo_(ss, HOJAS.formas, ['Forma de pago', 'Activa'], [
-    ['Efectivo', 'Sí'],
     ['SINPE', 'Sí'],
     ['Tarjeta', 'Sí'],
   ], [160, 70]);
@@ -125,7 +152,7 @@ function setup() {
   sincronizarTarifas();
 
   // Orden de pestañas
-  [HOJAS.registros, HOJAS.tarifas, HOJAS.ubicaciones, HOJAS.aseguradoras, HOJAS.tipos, HOJAS.formas, HOJAS.config]
+  [HOJAS.registros, HOJAS.tarifas, HOJAS.ubicaciones, HOJAS.aseguradoras, HOJAS.descuentos, HOJAS.tipos, HOJAS.formas, HOJAS.config]
     .forEach(function (n, i) {
       const sh = ss.getSheetByName(n);
       if (sh) { ss.setActiveSheet(sh); ss.moveActiveSheet(i + 1); }
@@ -172,6 +199,7 @@ function crearRegistros_(ss) {
   validar('tipo', lista(HOJAS.tipos));
   validar('ubicacion', lista(HOJAS.ubicaciones));
   validar('aseguradora', lista(HOJAS.aseguradoras));
+  validar('descuento', lista(HOJAS.descuentos));
   validar('forma1', lista(HOJAS.formas));
   validar('forma2', lista(HOJAS.formas));
   validar('conSeguro', opciones(['Sí', 'No']));
@@ -187,18 +215,46 @@ function crearRegistros_(ss) {
   return sh;
 }
 
-function crearCatalogo_(ss, nombre, headers, ejemplo, anchos, extra) {
+/**
+ * Crea o actualiza una hoja de catálogo. Si ya existe: renombra encabezados viejos,
+ * agrega columnas que falten y completa solo las celdas vacías de las filas iniciales.
+ */
+function crearCatalogo_(ss, nombre, headers, iniciales, anchos, extra, renombrar) {
   let sh = ss.getSheetByName(nombre);
-  const nueva = !sh;
-  if (nueva) sh = ss.insertSheet(nombre);
+  if (!sh) sh = ss.insertSheet(nombre);
   if (sh.getLastRow() === 0) {
     sh.getRange(1, 1, 1, headers.length).setValues([headers]);
-    if (ejemplo.length) sh.getRange(2, 1, ejemplo.length, headers.length).setValues(ejemplo);
+    if (iniciales.length) sh.getRange(2, 1, iniciales.length, headers.length).setValues(iniciales);
+  } else {
+    completarCatalogo_(sh, headers, iniciales, renombrar || {});
   }
-  estiloEncabezado_(sh, headers.length);
+  estiloEncabezado_(sh, Math.max(headers.length, sh.getLastColumn()));
   anchos.forEach(function (a, i) { sh.setColumnWidth(i + 1, a); });
   if (extra) extra(sh);
   return sh;
+}
+
+function completarCatalogo_(sh, headers, iniciales, renombrar) {
+  const nCols = Math.max(sh.getLastColumn(), 1);
+  const v = sh.getRange(1, 1, Math.max(sh.getLastRow(), 1), nCols).getValues().map(function (r) { return r.slice(); });
+  let cab = v[0].map(function (h) { const t = String(h).trim(); return renombrar[t] || t; });
+  headers.forEach(function (h) {
+    if (cab.indexOf(h) < 0) {
+      cab.push(h);
+      v.forEach(function (r) { r.push(''); });
+    }
+  });
+  v[0] = cab;
+  iniciales.forEach(function (ini) {
+    const clave = normTxt_(ini[0]);
+    const fila = v.slice(1).filter(function (r) { return normTxt_(r[0]) === clave; })[0];
+    if (!fila) return;
+    headers.forEach(function (h, i) {
+      const j = cab.indexOf(h);
+      if ((fila[j] === '' || fila[j] == null) && ini[i] !== '') fila[j] = ini[i];
+    });
+  });
+  sh.getRange(1, 1, v.length, cab.length).setValues(v);
 }
 
 /** Agrega a Config las claves nuevas que no existan (sin tocar valores). */
@@ -231,6 +287,15 @@ function sincronizarTarifas() {
     if (tipos.indexOf(t.nombre) < 0) v.push([t.nombre].concat(cols.slice(1).map(function () { return ''; })));
   });
 
+  // Hoja recién creada (sin ningún monto): cargar las tarifas iniciales.
+  const vacia = v.slice(1).every(function (r) { return r.slice(1).every(function (x) { return x === '' || x == null; }); });
+  if (vacia) {
+    v.slice(1).forEach(function (r) {
+      const ini = TARIFAS_INICIALES[String(r[0]).trim()] || {};
+      for (let j = 1; j < cols.length; j++) if (ini[cols[j]] !== undefined) r[j] = ini[cols[j]];
+    });
+  }
+
   sh.getRange(1, 1, v.length, cols.length).setValues(v);
   estiloEncabezado_(sh, cols.length);
   sh.setFrozenColumns(1);
@@ -238,13 +303,15 @@ function sincronizarTarifas() {
   for (let c = 2; c <= cols.length; c++) sh.setColumnWidth(c, 120);
   if (v.length > 1 && cols.length > 1) {
     const datos = sh.getRange(2, 2, v.length - 1, cols.length - 1);
-    datos.setNumberFormat(MONEDA);
+    datos.setNumberFormat(MONEDA).setHorizontalAlignment('right');
     sh.setConditionalFormatRules([
       SpreadsheetApp.newConditionalFormatRule().whenCellEmpty().setBackground(COLOR.amarilloSuave).setRanges([datos]).build(),
+      SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(NO_APLICA).setBackground(COLOR.grisSuave)
+        .setFontColor(COLOR.gris).setRanges([datos]).build(),
     ]);
   }
-  sh.getRange(1, 1).setNote('Monto total de la cita por tipo y ubicación. En citas de pareja es el monto por ambas personas. ' +
-    'Celdas amarillas = sin tarifa (en la app se digita el monto).');
+  sh.getRange(1, 1).setNote('Tarifa por tipo de cita y ubicación. En citas de pareja es el monto POR PERSONA. ' +
+    'Celda vacía (amarilla) = sin tarifa: en la app se digita el monto. "' + NO_APLICA + '" = ese tipo no se ofrece en esa ubicación.');
 }
 
 function estiloEncabezado_(sh, n) {
@@ -369,10 +436,7 @@ function getEventos(fechaStr) {
 
 /** Crea (sin id) o actualiza (con id) un registro. */
 function guardarRegistro(data) {
-  const cats = catalogos_();
-  const reg = normalizarRegistro_(data || {}, cats);
-  const t = tarifas_();
-  reg.tarifa = t[reg.tipo] && t[reg.tipo][reg.ubicacion] != null ? t[reg.tipo][reg.ubicacion] : '';
+  const reg = normalizarRegistro_(data || {}, catalogos_(), tarifas_());
 
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
@@ -489,7 +553,7 @@ function marcarEstadoAseguradora(mes, aseguradora, desde, hacia) {
 /**
  * Genera un reporte como Google Sheet nueva (carpeta de reportes en Drive)
  * y devuelve enlaces para abrirla o descargarla en PDF / Excel.
- * opc: { tipo: 'general' | 'sede' | 'aseguradora', mes: 'yyyy-MM', filtro, nombres: bool }
+ * opc: { tipo: 'general' | 'sede' | 'encargado' | 'aseguradora', mes: 'yyyy-MM', filtro, nombres: bool }
  */
 function exportarReporte(opc) {
   opc = opc || {};
@@ -498,7 +562,7 @@ function exportarReporte(opc) {
   const regs = registrosDelMes_(opc.mes);
   const etiqueta = etiquetaMes_(opc.mes);
   let titulo;
-  if (opc.tipo === 'sede') titulo = 'Liquidación ' + opc.filtro + ' · ' + etiqueta;
+  if (opc.tipo === 'sede' || opc.tipo === 'encargado') titulo = 'Liquidación ' + opc.filtro + ' · ' + etiqueta;
   else if (opc.tipo === 'aseguradora') titulo = 'Cobro ' + opc.filtro + ' · ' + etiqueta;
   else titulo = 'Reporte general · ' + etiqueta;
 
@@ -510,6 +574,7 @@ function exportarReporte(opc) {
   w.encabezado(titulo, 'Generado el ' + Utilities.formatDate(new Date(), TZ, 'dd/MM/yyyy'));
 
   if (opc.tipo === 'sede') reporteSede_(w, regs, cats, opc);
+  else if (opc.tipo === 'encargado') reporteEncargado_(w, regs, cats, opc);
   else if (opc.tipo === 'aseguradora') reporteAseguradora_(w, regs, opc);
   else reporteGeneral_(w, regs, cats);
 
@@ -526,7 +591,8 @@ function exportarReporte(opc) {
 
 /* ───────────────────────── Registros ───────────────────────── */
 
-function normalizarRegistro_(d, cats) {
+/** Valida y completa un registro; calcula tarifa de lista y descuento. */
+function normalizarRegistro_(d, cats, tarifas) {
   const s = function (v) { return v == null ? '' : String(v).trim(); };
   const faltan = [];
 
@@ -564,6 +630,25 @@ function normalizarRegistro_(d, cats) {
 
   if (faltan.length) throw new Error('Falta completar: ' + faltan.join(', ') + '.');
 
+  // Reglas de catálogo: tipo ofrecido en la ubicación, seguro y descuento permitidos.
+  const tarifaBase = tarifas[tipo] ? tarifas[tipo][ubicacion] : null;
+  if (tarifaBase === false) throw new Error(tipo + ' no se ofrece en ' + ubicacion + '.');
+  const aseg = cats.aseguradoras.filter(function (a) { return a.nombre === aseguradora; })[0];
+  if (conSeguro && aseg && !aplicaEn_(aseg.ubicaciones, ubicacion)) {
+    throw new Error(aseguradora + ' solo aplica en ' + aseg.ubicaciones.join(', ') + '.');
+  }
+  const personas = pareja ? 2 : 1;
+  const tarifa = typeof tarifaBase === 'number' ? tarifaBase * personas : '';
+  const descuento = conSeguro ? '' : s(d.descuento);
+  let montoDescuento = '';
+  if (descuento) {
+    const desc = cats.descuentos.filter(function (x) { return x.nombre === descuento; })[0];
+    if (desc && !descuentoAplica_(desc, ubicacion, tipo)) {
+      throw new Error('El descuento ' + descuento + ' no aplica a ' + tipo + ' en ' + ubicacion + '.');
+    }
+    if (desc && tarifa !== '') montoDescuento = Math.round(tarifa * desc.porcentaje);
+  }
+
   const estado = conSeguro
     ? (ESTADOS_ASEGURADORA.indexOf(s(d.estadoAseguradora)) >= 0 ? s(d.estadoAseguradora) : 'Pendiente')
     : '';
@@ -578,6 +663,9 @@ function normalizarRegistro_(d, cats) {
     ubicacion: ubicacion,
     conSeguro: conSeguro,
     aseguradora: aseguradora,
+    tarifa: tarifa,
+    descuento: descuento,
+    montoDescuento: montoDescuento,
     pago1: pago1,
     forma1: forma1,
     pago2: dosPagos ? pago2 : '',
@@ -634,6 +722,8 @@ function filaAObjeto_(fila, idx) {
     conSeguro: conSeguro,
     aseguradora: conSeguro ? s('aseguradora') : '',
     tarifa: g('tarifa') === '' ? null : num_(g('tarifa')),
+    descuento: s('descuento'),
+    montoDescuento: num_(g('montoDescuento')),
     pago1: pago1,
     forma1: s('forma1'),
     pago2: pago2,
@@ -720,19 +810,53 @@ function catalogos_() {
           ? String(r['Base de comisión']).trim() : BASES_COMISION[0],
       };
     });
+  const montoONull = function (m) { return m === '' || m == null ? null : num_(m); };
   const aseguradoras = leerTabla_(HOJAS.aseguradoras)
     .filter(function (r) { return r['Aseguradora'] && activo(r, 'Activa'); })
     .map(function (r) {
-      const m = r['Monto por consulta'];
-      return { nombre: String(r['Aseguradora']).trim(), monto: m === '' || m == null ? null : num_(m) };
+      return {
+        nombre: String(r['Aseguradora']).trim(),
+        monto: montoONull(r['Monto aseguradora'] !== undefined ? r['Monto aseguradora'] : r['Monto por consulta']),
+        montoPaciente: montoONull(r['Monto paciente']),
+        ubicaciones: listaConfig_(r['Ubicaciones']),
+      };
+    });
+  const descuentos = leerTabla_(HOJAS.descuentos)
+    .filter(function (r) { return r['Descuento'] && activo(r, 'Activo'); })
+    .map(function (r) {
+      return {
+        nombre: String(r['Descuento']).trim(),
+        porcentaje: pct_(r['% descuento']),
+        ubicaciones: listaConfig_(r['Ubicaciones']),
+        exceptoTipos: listaConfig_(r['Excepto tipos']),
+      };
     });
   const formas = leerTabla_(HOJAS.formas)
     .filter(function (r) { return r['Forma de pago'] && activo(r, 'Activa'); })
     .map(function (r) { return String(r['Forma de pago']).trim(); });
-  return { tipos: tipos, ubicaciones: ubicaciones, aseguradoras: aseguradoras, formas: formas, estados: ESTADOS_ASEGURADORA };
+  return {
+    tipos: tipos, ubicaciones: ubicaciones, aseguradoras: aseguradoras, descuentos: descuentos,
+    formas: formas, estados: ESTADOS_ASEGURADORA,
+  };
 }
 
-/** Tarifas en matriz: filas = tipo de cita, columnas = ubicación. Vacío = sin tarifa. */
+/** Lista de ubicaciones vacía = aplica en todas. */
+function aplicaEn_(lista, ubicacion) {
+  if (!lista || !lista.length) return true;
+  const u = normTxt_(ubicacion);
+  return lista.some(function (x) { return normTxt_(x) === u; });
+}
+
+function descuentoAplica_(desc, ubicacion, tipo) {
+  const t = normTxt_(tipo);
+  return aplicaEn_(desc.ubicaciones, ubicacion) &&
+    !desc.exceptoTipos.some(function (x) { return normTxt_(x) === t; });
+}
+
+/**
+ * Tarifas en matriz: filas = tipo de cita, columnas = ubicación (por persona en pareja).
+ * Valor: número, null (vacío = sin tarifa) o false ("No aplica" = no se ofrece ahí).
+ */
 function tarifas_() {
   const sh = ss_().getSheetByName(HOJAS.tarifas);
   const out = {};
@@ -745,7 +869,10 @@ function tarifas_() {
     out[tipo] = {};
     for (let j = 1; j < ubic.length; j++) {
       if (!ubic[j]) continue;
-      out[tipo][ubic[j]] = v[i][j] === '' || v[i][j] == null ? null : num_(v[i][j]);
+      const x = v[i][j];
+      if (x === '' || x == null) out[tipo][ubic[j]] = null;
+      else if (typeof x === 'string' && !/\d/.test(x)) out[tipo][ubic[j]] = false;
+      else out[tipo][ubic[j]] = num_(x);
     }
   }
   return out;
@@ -1004,29 +1131,46 @@ function sugerirDesdeEvento_(titulo, lugar, cats) {
 /* ───────────────────────── Reportes ───────────────────────── */
 
 function resumen_(regs, cats) {
-  const tot = { consultas: 0, personas: 0, pagoPacientes: 0, aseguradoras: 0, facturado: 0, comisiones: 0, porCobrar: 0 };
+  const tot = { consultas: 0, personas: 0, pagoPacientes: 0, aseguradoras: 0, facturado: 0, descuentos: 0, comisiones: 0, porCobrar: 0 };
   const porUbic = {};
   const porAseg = {};
   const porTipo = {};
   const porForma = {};
+  const porEnc = {};
+  const cfgUbic = configUbicaciones_(cats);
   const obtener = function (mapa, k, init) { if (!mapa[k]) mapa[k] = init(); return mapa[k]; };
 
   regs.forEach(function (r) {
     const personas = r.paciente2 ? 2 : 1;
+    const comision = comisionDe_(r, cfgUbic);
     tot.consultas++;
     tot.personas += personas;
     tot.pagoPacientes += r.totalPaciente;
     tot.aseguradoras += r.montoAseguradora;
     tot.facturado += r.totalFacturado;
+    tot.descuentos += r.montoDescuento || 0;
+    tot.comisiones += comision;
 
-    const u = obtener(porUbic, r.ubicacion || '(sin ubicación)', function () {
-      return { nombre: r.ubicacion || '(sin ubicación)', consultas: 0, personas: 0, pagoPacientes: 0, aseguradoras: 0, facturado: 0 };
+    const nombreU = r.ubicacion || '(sin ubicación)';
+    const u = obtener(porUbic, nombreU, function () {
+      return { nombre: nombreU, consultas: 0, personas: 0, pagoPacientes: 0, aseguradoras: 0, facturado: 0, montoBase: 0, comision: 0 };
     });
     u.consultas++;
     u.personas += personas;
     u.pagoPacientes += r.totalPaciente;
     u.aseguradoras += r.montoAseguradora;
     u.facturado += r.totalFacturado;
+    u.montoBase += baseComision_(r, cfgUbic);
+    u.comision += comision;
+
+    const enc = (cfgUbic[r.ubicacion] || {}).encargado;
+    if (enc) {
+      const e = obtener(porEnc, enc, function () { return { nombre: enc, ubicaciones: [], consultas: 0, facturado: 0, comision: 0 }; });
+      if (e.ubicaciones.indexOf(r.ubicacion) < 0) e.ubicaciones.push(r.ubicacion);
+      e.consultas++;
+      e.facturado += r.totalFacturado;
+      e.comision += comision;
+    }
 
     if (r.conSeguro) {
       const a = obtener(porAseg, r.aseguradora || '(sin aseguradora)', function () {
@@ -1053,17 +1197,13 @@ function resumen_(regs, cats) {
     });
   });
 
-  const cfgUbic = {};
-  cats.ubicaciones.forEach(function (u) { cfgUbic[u.nombre] = u; });
   const ubicaciones = ordenar_(porUbic, cats.ubicaciones.map(function (u) { return u.nombre; }))
     .map(function (u) {
-      const cfg = cfgUbic[u.nombre] || { porcentaje: 0, base: BASES_COMISION[0], encargado: '' };
-      u.encargado = cfg.encargado;
-      u.porcentaje = cfg.porcentaje;
-      u.base = cfg.base;
-      u.montoBase = cfg.base === 'Pago paciente' ? u.pagoPacientes : u.facturado;
-      u.comision = Math.round(u.montoBase * cfg.porcentaje);
-      tot.comisiones += u.comision;
+      const cfg = cfgUbic[u.nombre] || {};
+      u.encargado = cfg.encargado || '';
+      u.porcentaje = cfg.porcentaje || 0;
+      u.base = cfg.base || BASES_COMISION[0];
+      u.nutricionista = u.facturado - u.comision;
       return u;
     });
   tot.neto = tot.facturado - tot.comisiones;
@@ -1071,10 +1211,29 @@ function resumen_(regs, cats) {
   return {
     totales: tot,
     ubicaciones: ubicaciones,
+    encargados: ordenar_(porEnc, []),
     aseguradoras: ordenar_(porAseg, cats.aseguradoras.map(function (a) { return a.nombre; })),
     tipos: ordenar_(porTipo, cats.tipos.map(function (t) { return t.nombre; })),
     formas: ordenar_(porForma, cats.formas),
   };
+}
+
+function configUbicaciones_(cats) {
+  const m = {};
+  cats.ubicaciones.forEach(function (u) { m[u.nombre] = u; });
+  return m;
+}
+
+function baseComision_(r, cfgUbic) {
+  const cfg = cfgUbic[r.ubicacion];
+  if (!cfg) return 0;
+  return cfg.base === 'Pago paciente' ? r.totalPaciente : r.totalFacturado;
+}
+
+/** Lo que se le paga al encargado de la ubicación por esta consulta. */
+function comisionDe_(r, cfgUbic) {
+  const cfg = cfgUbic[r.ubicacion];
+  return cfg ? Math.round(baseComision_(r, cfgUbic) * cfg.porcentaje) : 0;
 }
 
 /** Valores del mapa en el orden del catálogo; lo que no esté en el catálogo va al final. */
@@ -1085,12 +1244,16 @@ function ordenar_(mapa, orden) {
   return out;
 }
 
+function nombreNutricionista_() {
+  return config_()['Nutricionista'] || 'la nutricionista';
+}
+
 function reporteSede_(w, regs, cats, opc) {
   const u = cats.ubicaciones.filter(function (x) { return x.nombre === opc.filtro; })[0] ||
     { nombre: opc.filtro, encargado: '', porcentaje: 0, base: BASES_COMISION[0] };
   const filas = regs.filter(function (r) { return r.ubicacion === u.nombre; });
   const res = resumen_(filas, cats);
-  const ub = res.ubicaciones[0] || { facturado: 0, montoBase: 0, comision: 0, consultas: 0 };
+  const ub = res.ubicaciones[0] || { facturado: 0, montoBase: 0, comision: 0, consultas: 0, nutricionista: 0 };
 
   w.subtitulo('Detalle de consultas');
   const conNombres = opc.nombres !== false;
@@ -1099,7 +1262,7 @@ function reporteSede_(w, regs, cats, opc) {
   const formatos = [FECHA, '@'].concat(conNombres ? ['@'] : []).concat(['@', MONEDA, MONEDA, MONEDA]);
   const rows = filas.map(function (r) {
     return [aFecha_(r.fecha), r.hora].concat(conNombres ? [nombres_(r)] : [])
-      .concat([r.tipo, r.totalPaciente, r.montoAseguradora, r.totalFacturado]);
+      .concat([r.tipo + (r.descuento ? ' (' + r.descuento + ')' : ''), r.totalPaciente, r.montoAseguradora, r.totalFacturado]);
   });
   const total = ['Total', ''].concat(conNombres ? [''] : [])
     .concat([filas.length + ' consultas', res.totales.pagoPacientes, res.totales.aseguradoras, res.totales.facturado]);
@@ -1110,10 +1273,43 @@ function reporteSede_(w, regs, cats, opc) {
     ['Consultas atendidas', ub.consultas, '0'],
     ['Total facturado', ub.facturado || 0, MONEDA],
     ['Base de cálculo', u.base, '@'],
-    ['Monto base', ub.montoBase || 0, MONEDA],
     ['Porcentaje acordado', u.porcentaje, '0.##%'],
+    ['Monto para ' + nombreNutricionista_(), ub.nutricionista || 0, MONEDA],
   ]);
   w.destacado('Monto a pagar' + (u.encargado ? ' a ' + u.encargado : ''), ub.comision || 0, MONEDA);
+}
+
+/** Liquidación de una persona que cobra en una o varias ubicaciones (p. ej. Andrea: Escazú + Domicilio). */
+function reporteEncargado_(w, regs, cats, opc) {
+  const cfgUbic = configUbicaciones_(cats);
+  const ubics = cats.ubicaciones.filter(function (u) { return u.encargado === opc.filtro; });
+  const nombresU = ubics.map(function (u) { return u.nombre; });
+  const filas = regs.filter(function (r) { return nombresU.indexOf(r.ubicacion) >= 0; });
+  const conNombres = opc.nombres !== false;
+
+  w.subtitulo('Detalle de consultas');
+  const headers = ['Fecha', 'Ubicación'].concat(conNombres ? ['Paciente(s)'] : [])
+    .concat(['Tipo de cita', 'Total facturado', '%', 'A pagar']);
+  const formatos = [FECHA, '@'].concat(conNombres ? ['@'] : []).concat(['@', MONEDA, '0.##%', MONEDA]);
+  let facturado = 0;
+  let pagar = 0;
+  const rows = filas.map(function (r) {
+    const c = comisionDe_(r, cfgUbic);
+    facturado += r.totalFacturado;
+    pagar += c;
+    return [aFecha_(r.fecha), r.ubicacion].concat(conNombres ? [nombres_(r)] : [])
+      .concat([r.tipo + (r.descuento ? ' (' + r.descuento + ')' : ''), r.totalFacturado, cfgUbic[r.ubicacion].porcentaje, c]);
+  });
+  const total = ['Total', ''].concat(conNombres ? [''] : []).concat([filas.length + ' consultas', facturado, '', pagar]);
+  w.tabla(headers, rows, formatos, total);
+
+  w.subtitulo('Resumen por ubicación');
+  const res = resumen_(filas, cats);
+  w.pares(res.ubicaciones.map(function (u) {
+    return [u.nombre + ' · ' + u.consultas + ' consultas · ' + Math.round(u.porcentaje * 100) + '% de ' + formatoColones_(u.facturado),
+      u.comision, MONEDA];
+  }));
+  w.destacado('Total a pagar a ' + opc.filtro, pagar, MONEDA);
 }
 
 function reporteAseguradora_(w, regs, opc) {
@@ -1141,6 +1337,7 @@ function reporteAseguradora_(w, regs, opc) {
 function reporteGeneral_(w, regs, cats) {
   const res = resumen_(regs, cats);
   const t = res.totales;
+  const nutri = nombreNutricionista_();
   w.subtitulo('Resumen del mes');
   w.pares([
     ['Consultas', t.consultas, '0'],
@@ -1148,18 +1345,25 @@ function reporteGeneral_(w, regs, cats) {
     ['Pagado por pacientes', t.pagoPacientes, MONEDA],
     ['Monto aseguradoras', t.aseguradoras, MONEDA],
     ['Total facturado', t.facturado, MONEDA],
-    ['Comisiones a sedes', t.comisiones, MONEDA],
+    ['Descuentos aplicados', t.descuentos, MONEDA],
+    ['Pagos a colaboradoras', t.comisiones, MONEDA],
     ['Por cobrar a aseguradoras', t.porCobrar, MONEDA],
   ]);
-  w.destacado('Neto después de comisiones', t.neto, MONEDA);
+  w.destacado('Monto para ' + nutri, t.neto, MONEDA);
 
   w.subtitulo('Por ubicación');
-  w.tabla(['Ubicación', 'Consultas', 'Pago pacientes', 'Aseguradoras', 'Total facturado', '% comisión', 'Comisión sede'],
+  w.tabla(['Ubicación', 'Consultas', 'Pago pacientes', 'Aseguradoras', 'Total facturado', '% sede', 'Sede', nutri],
     res.ubicaciones.map(function (u) {
-      return [u.nombre, u.consultas, u.pagoPacientes, u.aseguradoras, u.facturado, u.porcentaje, u.comision];
+      return [u.nombre, u.consultas, u.pagoPacientes, u.aseguradoras, u.facturado, u.porcentaje, u.comision, u.nutricionista];
     }),
-    ['@', '0', MONEDA, MONEDA, MONEDA, '0.##%', MONEDA],
-    ['Total', t.consultas, t.pagoPacientes, t.aseguradoras, t.facturado, '', t.comisiones]);
+    ['@', '0', MONEDA, MONEDA, MONEDA, '0.##%', MONEDA, MONEDA],
+    ['Total', t.consultas, t.pagoPacientes, t.aseguradoras, t.facturado, '', t.comisiones, t.neto]);
+
+  w.subtitulo('Pagos a colaboradoras');
+  w.tabla(['Persona', 'Ubicaciones', 'Consultas', 'Total facturado', 'A pagar'],
+    res.encargados.map(function (e) { return [e.nombre, e.ubicaciones.join(', '), e.consultas, e.facturado, e.comision]; }),
+    ['@', '@', '0', MONEDA, MONEDA],
+    ['Total', '', '', '', t.comisiones]);
 
   w.subtitulo('Por aseguradora');
   w.tabla(['Aseguradora', 'Consultas', 'Monto', 'Pendiente', 'Facturado', 'Pagado'],
@@ -1175,6 +1379,10 @@ function reporteGeneral_(w, regs, cats) {
   w.tabla(['Forma de pago', 'Pagos', 'Monto'],
     res.formas.map(function (x) { return [x.nombre, x.pagos, x.monto]; }),
     ['@', '0', MONEDA], null);
+}
+
+function formatoColones_(n) {
+  return '₡' + String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 }
 
 /** Pequeño ayudante para escribir reportes con el estilo de la marca. */

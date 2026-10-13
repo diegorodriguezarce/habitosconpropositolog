@@ -18,33 +18,21 @@ const shim = `
 <script>${leer('src/Code.gs')}</script>
 <script>
 (function () {
-  // Datos de ejemplo
+  // Datos de ejemplo (tarifas, comisiones, Sana Sana y VOLK vienen de setup)
   setup();
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const t = ss.getSheetByName('Tarifas');
-  const v = t.getRange(1, 1, t.getLastRow(), t.getLastColumn()).getValues();
-  const precio = { 'Primera vez': 30000, 'Control': 22000, 'Pareja primera vez': 50000, 'Pareja control': 40000, 'Mediciones': 10000 };
-  for (let i = 1; i < v.length; i++) for (let j = 1; j < v[0].length; j++) v[i][j] = precio[v[i][0]] + (v[0][j] === 'Curridabat' ? 3000 : 0);
-  v[5][3] = '';
-  t.getRange(1, 1, v.length, v[0].length).setValues(v);
-  ss.getSheetByName('Ubicaciones').getRange(2, 3, 2, 1).setValues([[0.2], [0.15]]);
-  ss.getSheetByName('Aseguradoras').getRange(2, 2).setValue(18000);
-
   const hoy = new Date();
   const f = (d) => Utilities.formatDate(new Date(hoy.getFullYear(), hoy.getMonth(), d), '', 'yyyy-MM-dd');
   const dia = Math.max(1, hoy.getDate() - 1);
-  const nombres = ['Valeria Quesada', 'Daniela Arias', 'José Pablo Solano', 'Mariana Ulate', 'Andrés Brenes', 'Fernanda Mora', 'Gabriela Chaves', 'Sebastián Rojas'];
-  const datos = [
-    ['Primera vez', 'Escazú', 30000, 'SINPE'], ['Control', 'Curridabat', 25000, 'Efectivo'],
-    ['Control', 'Escazú', 22000, 'Tarjeta'], ['Mediciones', 'Escazú', 10000, 'SINPE'],
-    ['Primera vez', 'Curridabat', 33000, 'SINPE'], ['Control', 'Domicilio', 22000, 'SINPE'],
-  ];
-  datos.forEach((d, i) => guardarRegistro({ fecha: f(1 + (i * 3) % dia), hora: (8 + i) + ':00', paciente: nombres[i],
-    tipo: d[0], ubicacion: d[1], pago1: d[2], forma1: d[3] }));
-  guardarRegistro({ fecha: f(Math.min(dia, 5)), hora: '15:00', paciente: nombres[6], tipo: 'Control', ubicacion: 'Escazú',
-    conSeguro: true, aseguradora: 'Sana Sana', montoAseguradora: 18000, pago1: 7000, forma1: 'SINPE' });
-  guardarRegistro({ fecha: f(dia), hora: '17:00', paciente: nombres[7], paciente2: 'Paula Jiménez', tipo: 'Pareja control',
-    ubicacion: 'Curridabat', dosPagos: true, pago1: 21500, forma1: 'SINPE', pago2: 21500, forma2: 'Efectivo' });
+  const g = (d) => guardarRegistro(Object.assign({ forma1: 'SINPE' }, d));
+  g({ fecha: f(1), hora: '08:00', paciente: 'Valeria Quesada', tipo: 'Primera vez', ubicacion: 'Escazú', pago1: 50000 });
+  g({ fecha: f(Math.min(dia, 3)), hora: '09:00', paciente: 'Daniela Arias', tipo: 'Control', ubicacion: 'Curridabat', pago1: 30000, forma1: 'Tarjeta' });
+  g({ fecha: f(Math.min(dia, 5)), hora: '10:00', paciente: 'José Pablo Solano', tipo: 'Control', ubicacion: 'Escazú',
+    conSeguro: true, aseguradora: 'Sana Sana', montoAseguradora: 8500, pago1: 16000 });
+  g({ fecha: f(Math.min(dia, 6)), hora: '11:00', paciente: 'Mariana Ulate', tipo: 'Mediciones', ubicacion: 'Escazú', pago1: 14000 });
+  g({ fecha: f(Math.min(dia, 7)), hora: '15:00', paciente: 'Andrés Brenes', tipo: 'Control', ubicacion: 'Domicilio', descuento: 'VOLK', pago1: 27000 });
+  g({ fecha: f(Math.min(dia, 8)), hora: '16:00', paciente: 'Gabriela Chaves', tipo: 'Primera vez', ubicacion: 'Curridabat', pago1: 40000, forma1: 'Tarjeta' });
+  g({ fecha: f(dia), hora: '17:00', paciente: 'Sebastián Rojas', paciente2: 'Paula Jiménez', tipo: 'Pareja control',
+    ubicacion: 'Escazú', dosPagos: true, pago1: 32000, pago2: 32000, forma2: 'Tarjeta' });
 
   // google.script.run simulado (asíncrono y con la misma restricción de no devolver Date)
   function revisar(o, ruta) {

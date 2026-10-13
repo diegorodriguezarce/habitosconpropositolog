@@ -2,11 +2,12 @@
 
 App web (Google Apps Script + Google Sheets) para que Moni registre cada consulta desde el celular o la PC. Todo queda en **una sola tabla** y desde la PC se generan los reportes del mes por sede y por aseguradora.
 
-- **Registrar**: formulario con autollenado. La tarifa sale de *tipo de cita × ubicación*, las citas del día salen de Google Calendar o iCal y el app sugiere *Primera vez / Control* según si el paciente ya vino.
-- **Seguro**: al marcar "Sí" aparecen la aseguradora, el total de la consulta con seguro, lo que paga la aseguradora (con monto fijo editable) y lo que paga el paciente, que se calcula solo. El estado del cobro es *Pendiente → Facturado → Pagado*.
+- **Registrar**: formulario con autollenado. La tarifa sale de *ubicación × tipo de cita* (por persona en pareja), las citas del día salen de Google Calendar o iCal y el app sugiere *Primera vez / Control* según si el paciente ya vino. Los tipos que no se ofrecen en una ubicación (Mediciones en Curridabat) aparecen desactivados.
+- **Descuentos**: VOLK, 10 % en Domicilio y no aplica a Mediciones. Se configuran en la hoja *Descuentos*.
+- **Seguro**: solo aparece en las ubicaciones donde se acepta (Sana Sana en Escazú: ₡8 500 la aseguradora + ₡16 000 el paciente). Al marcar "Sí" aparecen la aseguradora, el total de la consulta con seguro, lo que paga la aseguradora (con monto fijo editable) y lo que paga el paciente, que se calcula solo. El estado del cobro es *Pendiente → Facturado → Pagado*.
 - **Pareja**: dos nombres y uno o dos pagos, cada uno con su forma de pago.
 - **Recientes**: los últimos 10 registros, editables o eliminables.
-- **Reportes**: totales del mes por ubicación (con la comisión de cada sede), por aseguradora, por tipo de cita y por forma de pago. Se exportan a una hoja nueva en Drive y se descargan en PDF o Excel.
+- **Reportes**: totales del mes por ubicación con la parte de la sede y la de Moni (Escazú 40/60 con Andrea, Curridabat 40/60 con Raque, Domicilio 20/80 con Andrea), lo que se le paga a cada persona en total, por aseguradora, por tipo de cita y por forma de pago. Se exportan a una hoja nueva en Drive (general, liquidación por persona, por sede o cobro a aseguradora) y se descargan en PDF o Excel.
 
 Solo la usa la administradora: la app corre con su cuenta y nadie más tiene acceso.
 
@@ -33,11 +34,12 @@ test/
 | Hoja | Para qué |
 |---|---|
 | **Registros** | La tabla única: una fila por atención. Se puede ordenar, filtrar o usar en tablas dinámicas y Looker Studio. Las columnas se buscan por nombre, así que se pueden agregar columnas propias. |
-| **Tarifas** | Matriz *tipo de cita × ubicación*. Celdas amarillas = sin tarifa (en la app se digita el monto). En pareja es el monto por ambas personas. |
-| **Ubicaciones** | Encargado, **% de comisión** y base de cálculo (*Total facturado* = paciente + aseguradora, o *Pago paciente*). |
-| **Aseguradoras** | Nombre y monto fijo por consulta (editable en cada registro). |
+| **Tarifas** | Matriz *tipo de cita × ubicación*. En pareja es el monto **por persona**. Celdas amarillas = sin tarifa (en la app se digita el monto). `No aplica` = ese tipo no se ofrece en esa ubicación. |
+| **Ubicaciones** | Encargado (a quién se le paga), **% que se le paga** y base de cálculo (*Total facturado* = paciente + aseguradora). El resto es de la nutricionista. Si una persona aparece en varias ubicaciones, los reportes suman lo que se le paga en total. |
+| **Aseguradoras** | Monto que paga la aseguradora, monto que paga el paciente y ubicaciones donde se acepta (ambos montos se pueden editar en cada registro). |
+| **Descuentos** | Nombre, %, ubicaciones donde aplica y tipos de cita excluidos. |
 | **Tipos de cita** | Lista de tipos; *Es pareja = Sí* activa el segundo nombre. |
-| **Formas de pago** | Efectivo, SINPE, Tarjeta… |
+| **Formas de pago** | SINPE y Tarjeta. |
 | **Config** | Nombre de la nutricionista, calendarios de Google, enlaces iCal, filtro de eventos y carpeta de reportes. |
 
 Para agregar una ubicación, aseguradora o tipo nuevo basta con escribirlo en su hoja y correr **Hábitos → Sincronizar tarifas con catálogos**, que agrega la fila o columna en Tarifas. Para desactivar algo sin borrarlo, ponga *No* en la columna *Activo/Activa*.
@@ -53,15 +55,18 @@ Para agregar una ubicación, aseguradora o tipo nuevo basta con escribirlo en su
    - Cree tres archivos HTML (**+ → HTML**) llamados exactamente `index`, `styles` y `app`, y pegue en cada uno el contenido de `src/index.html`, `src/styles.html` y `src/app.html`.
    - En **Configuración del proyecto** (ícono ⚙️) active *"Mostrar el archivo de manifiesto appsscript.json"* y reemplace su contenido con `src/appsscript.json`.
 4. Arriba, elija la función **`setup`** (debe ser la primera de la lista; si aparece `doGet`, cámbiela) y presione **Ejecutar**. También se puede correr desde la hoja con **Hábitos → Configurar / reparar hojas**. Google pide permisos: acéptelos. Si sale *"Google no verificó esta app"*, entre a *Configuración avanzada → Ir a … (no seguro)*; es normal porque la app es suya. `setup` crea todas las hojas.
-5. Vuelva a la hoja y complete:
-   - **Tarifas**: los 15 montos.
-   - **Ubicaciones**: % de comisión de Escazú (Andrea · DS) y de Curridabat.
-   - **Aseguradoras**: monto fijo de Sana Sana.
+5. Vuelva a la hoja y revise los valores iniciales que ya vienen cargados:
+   - **Tarifas**: Escazú, Curridabat y Domicilio para los 5 tipos de cita.
+   - **Ubicaciones**: Andrea 40 % en Escazú y 20 % en Domicilio; Raque 40 % en Curridabat.
+   - **Aseguradoras**: Sana Sana, ₡8 500 + ₡16 000, solo en Escazú.
+   - **Descuentos**: VOLK 10 % en Domicilio, excepto Mediciones.
 6. Publique la app: **Implementar → Nueva implementación → ⚙️ Aplicación web**.
    - *Ejecutar como*: **Yo**
    - *Quién tiene acceso*: **Solo yo**
    - Copie la URL que termina en `/exec`.
 7. En el celular, abra esa URL en Chrome o Safari y use **Agregar a pantalla de inicio**.
+
+> Si ya tenía la hoja de una versión anterior, después de pegar el código nuevo use **Hábitos → Configurar / reparar hojas**: agrega las hojas y columnas nuevas y completa solo las celdas vacías, sin borrar lo que ya existe.
 
 > Cuando cambie el código, publique una nueva versión en **Implementar → Administrar implementaciones → ✏️ → Versión: Nueva**. Así la URL no cambia.
 

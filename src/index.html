@@ -49,12 +49,12 @@
             <label class="campo"><span>Hora</span><input type="time" id="hora"></label>
           </div>
           <div class="campo">
-            <span>Tipo de cita</span>
-            <div class="chips" data-name="tipo" id="chipsTipo"></div>
-          </div>
-          <div class="campo">
             <span>Ubicación</span>
             <div class="chips" data-name="ubicacion"></div>
+          </div>
+          <div class="campo">
+            <span>Tipo de cita</span>
+            <div class="chips" data-name="tipo" id="chipsTipo"></div>
           </div>
         </div>
 
@@ -72,7 +72,7 @@
           <datalist id="listaPacientes"></datalist>
         </div>
 
-        <div class="card">
+        <div class="card oculto" id="cardSeguro">
           <h2>Seguro médico</h2>
           <div class="campo">
             <span>¿Aplica seguro?</span>
@@ -102,6 +102,10 @@
           <div class="card-head">
             <h2>Pago del paciente</h2>
             <span class="sutil" id="hintTarifa"></span>
+          </div>
+          <div class="campo oculto" id="grupoDescuento">
+            <span>Descuento</span>
+            <div class="chips chips-sm" data-name="descuento"></div>
           </div>
           <div class="pago">
             <label class="campo"><span id="lblPago1">Monto</span>

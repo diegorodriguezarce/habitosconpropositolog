@@ -26,99 +26,151 @@ function hoja(ctx, nombre) {
   return ctx._libro.getSheetByName(nombre);
 }
 
-/** Pone montos de ejemplo en Tarifas, Ubicaciones y Aseguradoras. */
-function configurarMontos(ctx) {
-  const t = hoja(ctx, 'Tarifas');
-  const v = t.getRange(1, 1, t.getLastRow(), t.getLastColumn()).getValues();
-  const precio = { 'Primera vez': 30000, Control: 22000, 'Pareja primera vez': 50000, 'Pareja control': 40000, Mediciones: 10000 };
-  for (let i = 1; i < v.length; i++) {
-    for (let j = 1; j < v[0].length; j++) v[i][j] = precio[v[i][0]] + (v[0][j] === 'Curridabat' ? 3000 : 0);
-  }
-  t.getRange(1, 1, v.length, v[0].length).setValues(v);
-  const u = hoja(ctx, 'Ubicaciones');
-  u.getRange(2, 3, 3, 1).setValues([[0.2], ['15%'], [0]]);
-  hoja(ctx, 'Aseguradoras').getRange(2, 2).setValue(18000);
+/** Columna (1-based) de un encabezado en la hoja Registros. */
+function col(ctx, header) {
+  const sh = hoja(ctx, 'Registros');
+  return sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].indexOf(header) + 1;
 }
-
-const pruebas = [];
-const prueba = (nombre, fn) => pruebas.push({ nombre, fn });
-
-prueba('setup crea las hojas, es idempotente y deja tarifas en matriz', () => {
-  const ctx = nuevoEntorno();
-  ctx.setup();
-  const nombres = ctx._libro.getSheets().map((h) => h.getName());
-  igual(nombres, ['Registros', 'Tarifas', 'Ubicaciones', 'Aseguradoras', 'Tipos de cita', 'Formas de pago', 'Config']);
-  const t = hoja(ctx, 'Tarifas');
-  igual(t.getRange(1, 1, 1, 4).getValues()[0], ['Tipo de cita', 'Escazú', 'Curridabat', 'Domicilio']);
-  assert.strictEqual(t.getLastRow(), 6);
-  const reg = hoja(ctx, 'Registros');
-  assert.strictEqual(reg.getRange(1, 1, 1, reg.getLastColumn()).getValues()[0].length, 22);
-  const cfg = hoja(ctx, 'Config');
-  assert.strictEqual(cfg.getLastRow(), 6, 'Config no debe duplicar claves');
-});
-
-prueba('sincronizarTarifas agrega ubicaciones nuevas sin perder montos', () => {
-  const ctx = nuevoEntorno();
-  configurarMontos(ctx);
-  hoja(ctx, 'Ubicaciones').getRange(5, 1, 1, 5).setValues([['Virtual', '', 0, 'Total facturado', 'Sí']]);
-  ctx.sincronizarTarifas();
-  const tar = ctx.tarifas_();
-  assert.strictEqual(tar['Control']['Escazú'], 22000);
-  assert.strictEqual(tar['Control']['Virtual'], null);
-});
-
-prueba('bootstrap entrega catálogos y nada con Date', () => {
-  const ctx = nuevoEntorno();
-  configurarMontos(ctx);
-  const b = ctx.getBootstrap();
-  assert.strictEqual(JSON.stringify(b).includes('"__date'), false);
-  igual(b.cats.formas, ['Efectivo', 'SINPE', 'Tarjeta']);
-  assert.strictEqual(b.cats.ubicaciones[0].porcentaje, 0.2);
-  assert.strictEqual(b.cats.ubicaciones[1].porcentaje, 0.15);
-  assert.strictEqual(b.cats.aseguradoras[0].monto, 18000);
-  assert.strictEqual(b.tarifas['Primera vez']['Curridabat'], 33000);
-  assert.strictEqual(b.cats.tipos.filter((t) => t.pareja).length, 2);
-  sinFechas(b);
-});
 
 function sinFechas(o, ruta = 'resultado') {
   if (Object.prototype.toString.call(o) === '[object Date]') throw new Error('Date en ' + ruta + ' (google.script.run no lo permite)');
   if (o && typeof o === 'object') Object.keys(o).forEach((k) => sinFechas(o[k], ruta + '.' + k));
 }
 
-prueba('guardar consulta simple: fecha real, hora texto, totales', () => {
+const pruebas = [];
+const prueba = (nombre, fn) => pruebas.push({ nombre, fn });
+
+prueba('setup crea las hojas con tarifas, comisiones, seguro y descuento iniciales', () => {
   const ctx = nuevoEntorno();
-  configurarMontos(ctx);
+  ctx.setup();
+  const nombres = ctx._libro.getSheets().map((h) => h.getName());
+  igual(nombres, ['Registros', 'Tarifas', 'Ubicaciones', 'Aseguradoras', 'Descuentos', 'Tipos de cita', 'Formas de pago', 'Config']);
+  const t = hoja(ctx, 'Tarifas');
+  igual(t.getRange(1, 1, 6, 4).getValues(), [
+    ['Tipo de cita', 'Escazú', 'Curridabat', 'Domicilio'],
+    ['Primera vez', 50000, 40000, 35000],
+    ['Control', 35000, 30000, 30000],
+    ['Pareja primera vez', 47000, 35000, 30000],
+    ['Pareja control', 32000, 27000, 25000],
+    ['Mediciones', 14000, 'No aplica', 12000],
+  ]);
+  const reg = hoja(ctx, 'Registros');
+  assert.strictEqual(reg.getRange(1, 1, 1, reg.getLastColumn()).getValues()[0].length, 24);
+  assert.strictEqual(hoja(ctx, 'Config').getLastRow(), 6, 'Config no debe duplicar claves');
+  igual(hoja(ctx, 'Formas de pago').getRange(2, 1, 2, 1).getValues(), [['SINPE'], ['Tarjeta']]);
+  igual(hoja(ctx, 'Ubicaciones').getRange(2, 1, 3, 3).getValues(), [
+    ['Escazú', 'Andrea (DS · Diseñando tu Salud)', 0.4],
+    ['Curridabat', 'Raque', 0.4],
+    ['Domicilio', 'Andrea (DS · Diseñando tu Salud)', 0.2],
+  ]);
+});
+
+prueba('setup sobre una hoja vieja completa vacíos sin pisar datos', () => {
+  const env = crearEntornoGAS();
+  const ctx = vm.createContext(Object.assign({ console }, env));
+  vm.runInContext(CODE, ctx, { filename: 'Code.gs' });
+  const libro = ctx._libro;
+  const a = libro.insertSheet('Aseguradoras');
+  a.getRange(1, 1, 2, 3).setValues([['Aseguradora', 'Monto por consulta', 'Activa'], ['Sana Sana', '', 'Sí']]);
+  const u = libro.insertSheet('Ubicaciones');
+  u.getRange(1, 1, 3, 5).setValues([
+    ['Ubicación', 'Encargado / a quién se paga', '% comisión', 'Base de comisión', 'Activa'],
+    ['Escazú', 'Andrea', '', 'Total facturado', 'Sí'],
+    ['Curridabat', 'Encargado Curridabat', 0.35, 'Total facturado', 'Sí'],
+  ]);
+  ctx.setup();
+  igual(a.getRange(1, 1, 2, 5).getValues(), [
+    ['Aseguradora', 'Monto aseguradora', 'Activa', 'Monto paciente', 'Ubicaciones'],
+    ['Sana Sana', 8500, 'Sí', 16000, 'Escazú'],
+  ]);
+  igual(u.getRange(2, 1, 2, 3).getValues(), [['Escazú', 'Andrea', 0.4], ['Curridabat', 'Encargado Curridabat', 0.35]]);
+  const b = ctx.getBootstrap();
+  igual(b.cats.aseguradoras, [{ nombre: 'Sana Sana', monto: 8500, montoPaciente: 16000, ubicaciones: ['Escazú'] }]);
+});
+
+prueba('sincronizarTarifas agrega ubicaciones nuevas sin perder montos ni recargar', () => {
+  const ctx = nuevoEntorno();
+  const t = hoja(ctx, 'Tarifas');
+  t.getRange(3, 2).setValue(36000);
+  hoja(ctx, 'Ubicaciones').getRange(5, 1, 1, 5).setValues([['Virtual', '', 0, 'Total facturado', 'Sí']]);
+  ctx.sincronizarTarifas();
+  const tar = ctx.tarifas_();
+  assert.strictEqual(tar['Control']['Escazú'], 36000);
+  assert.strictEqual(tar['Control']['Virtual'], null);
+  assert.strictEqual(tar['Mediciones']['Curridabat'], false);
+});
+
+prueba('bootstrap entrega catálogos y nada con Date', () => {
+  const ctx = nuevoEntorno();
+  const b = ctx.getBootstrap();
+  sinFechas(b);
+  igual(b.cats.formas, ['SINPE', 'Tarjeta']);
+  igual(b.cats.ubicaciones.map((u) => [u.nombre, u.porcentaje]), [['Escazú', 0.4], ['Curridabat', 0.4], ['Domicilio', 0.2]]);
+  igual(b.cats.aseguradoras, [{ nombre: 'Sana Sana', monto: 8500, montoPaciente: 16000, ubicaciones: ['Escazú'] }]);
+  igual(b.cats.descuentos, [{ nombre: 'VOLK', porcentaje: 0.1, ubicaciones: ['Domicilio'], exceptoTipos: ['Mediciones'] }]);
+  assert.strictEqual(b.tarifas['Primera vez']['Curridabat'], 40000);
+  assert.strictEqual(b.tarifas['Mediciones']['Curridabat'], false);
+  assert.strictEqual(b.cats.tipos.filter((t) => t.pareja).length, 2);
+});
+
+prueba('consulta simple: fecha real, hora texto, tarifa de lista', () => {
+  const ctx = nuevoEntorno();
   const r = ctx.guardarRegistro({
     fecha: '2026-10-13', hora: '8:05', paciente: ' María Fernández ', tipo: 'Control', ubicacion: 'Escazú',
-    conSeguro: false, pago1: 22000, forma1: 'SINPE',
+    conSeguro: false, pago1: 35000, forma1: 'SINPE',
   });
   sinFechas(r);
   assert.strictEqual(r.registro.paciente, 'María Fernández');
   assert.strictEqual(r.registro.hora, '08:05');
-  assert.strictEqual(r.registro.totalFacturado, 22000);
-  assert.strictEqual(r.registro.tarifa, 22000);
-  const fila = hoja(ctx, 'Registros').getRange(2, 1, 1, 22).getValues()[0];
+  assert.strictEqual(r.registro.totalFacturado, 35000);
+  assert.strictEqual(r.registro.tarifa, 35000);
+  const fila = hoja(ctx, 'Registros').getRange(2, 1, 1, 24).getValues()[0];
   assert.ok(Object.prototype.toString.call(fila[1]) === '[object Date]', 'Fecha debe guardarse como fecha');
   assert.strictEqual(fila[1].getDate(), 13);
-  assert.strictEqual(fila[7], 'No');
+  assert.strictEqual(fila[col(ctx, 'Con seguro') - 1], 'No');
   assert.strictEqual(r.recientes.length, 1);
   assert.strictEqual(r.pacientes[0].n, 'María Fernández');
 });
 
-prueba('pareja con dos pagos y seguro', () => {
+prueba('pareja: tarifa por persona y dos pagos', () => {
   const ctx = nuevoEntorno();
-  configurarMontos(ctx);
   const r = ctx.guardarRegistro({
-    fecha: '2026-10-14', hora: '11:00', paciente: 'Ana Solís', paciente2: 'Luis Mora', tipo: 'Pareja primera vez',
-    ubicacion: 'Curridabat', conSeguro: true, aseguradora: 'Sana Sana', montoAseguradora: 18000,
-    dosPagos: true, pago1: 20000, forma1: 'Efectivo', pago2: 15000, forma2: 'Tarjeta',
+    fecha: '2026-10-14', paciente: 'Ana Solís', paciente2: 'Luis Mora', tipo: 'Pareja primera vez', ubicacion: 'Curridabat',
+    dosPagos: true, pago1: 35000, forma1: 'SINPE', pago2: 35000, forma2: 'Tarjeta',
   }).registro;
-  assert.strictEqual(r.totalPaciente, 35000);
-  assert.strictEqual(r.montoAseguradora, 18000);
-  assert.strictEqual(r.totalFacturado, 53000);
-  assert.strictEqual(r.estadoAseguradora, 'Pendiente');
+  assert.strictEqual(r.tarifa, 70000);
+  assert.strictEqual(r.totalPaciente, 70000);
   assert.strictEqual(r.paciente2, 'Luis Mora');
+});
+
+prueba('Sana Sana: 16 000 paciente + 8 500 aseguradora, solo en Escazú', () => {
+  const ctx = nuevoEntorno();
+  const base = { fecha: '2026-10-14', paciente: 'Pedro', tipo: 'Control', conSeguro: true, aseguradora: 'Sana Sana',
+    montoAseguradora: 8500, pago1: 16000, forma1: 'SINPE' };
+  const r = ctx.guardarRegistro(Object.assign({ ubicacion: 'Escazú' }, base)).registro;
+  assert.strictEqual(r.totalFacturado, 24500);
+  assert.strictEqual(r.estadoAseguradora, 'Pendiente');
+  assert.throws(() => ctx.guardarRegistro(Object.assign({ ubicacion: 'Curridabat' }, base)), /solo aplica en Escazú/);
+});
+
+prueba('Mediciones no se ofrece en Curridabat', () => {
+  const ctx = nuevoEntorno();
+  assert.throws(() => ctx.guardarRegistro({ fecha: '2026-10-14', paciente: 'X', tipo: 'Mediciones', ubicacion: 'Curridabat', pago1: 0 }),
+    /Mediciones no se ofrece en Curridabat/);
+});
+
+prueba('descuento VOLK: 10% en Domicilio, no en Mediciones ni otras sedes', () => {
+  const ctx = nuevoEntorno();
+  const g = (d) => ctx.guardarRegistro(Object.assign({ fecha: '2026-10-14', paciente: 'X', forma1: 'SINPE', descuento: 'VOLK' }, d)).registro;
+  const r = g({ tipo: 'Control', ubicacion: 'Domicilio', pago1: 27000 });
+  assert.strictEqual(r.tarifa, 30000);
+  assert.strictEqual(r.montoDescuento, 3000);
+  assert.strictEqual(r.descuento, 'VOLK');
+  const p = g({ tipo: 'Pareja control', ubicacion: 'Domicilio', paciente2: 'Y', pago1: 45000 });
+  assert.strictEqual(p.tarifa, 50000);
+  assert.strictEqual(p.montoDescuento, 5000);
+  assert.throws(() => g({ tipo: 'Mediciones', ubicacion: 'Domicilio', pago1: 12000 }), /VOLK no aplica a Mediciones/);
+  assert.throws(() => g({ tipo: 'Control', ubicacion: 'Escazú', pago1: 31500 }), /no aplica a Control en Escazú/);
 });
 
 prueba('validaciones', () => {
@@ -138,14 +190,13 @@ prueba('validaciones', () => {
 
 prueba('editar y eliminar conservan la fila correcta', () => {
   const ctx = nuevoEntorno();
-  configurarMontos(ctx);
-  const a = ctx.guardarRegistro({ fecha: '2026-10-01', paciente: 'A', tipo: 'Control', ubicacion: 'Escazú', pago1: 22000, forma1: 'SINPE' }).registro;
-  const b = ctx.guardarRegistro({ fecha: '2026-10-02', paciente: 'B', tipo: 'Control', ubicacion: 'Escazú', pago1: 22000, forma1: 'SINPE' }).registro;
-  const e = ctx.guardarRegistro(Object.assign({}, a, { id: a.id, paciente: 'A editada', pago1: 20000 })).registro;
+  const a = ctx.guardarRegistro({ fecha: '2026-10-01', paciente: 'A', tipo: 'Control', ubicacion: 'Escazú', pago1: 35000, forma1: 'SINPE' }).registro;
+  const b = ctx.guardarRegistro({ fecha: '2026-10-02', paciente: 'B', tipo: 'Control', ubicacion: 'Escazú', pago1: 35000, forma1: 'SINPE' }).registro;
+  const e = ctx.guardarRegistro(Object.assign({}, a, { id: a.id, paciente: 'A editada', pago1: 30000 })).registro;
   assert.strictEqual(e.id, a.id);
   assert.strictEqual(e.creado, a.creado);
   assert.strictEqual(hoja(ctx, 'Registros').getLastRow(), 3);
-  assert.strictEqual(hoja(ctx, 'Registros').getRange(2, 4).getValue(), 'A editada');
+  assert.strictEqual(hoja(ctx, 'Registros').getRange(2, col(ctx, 'Paciente')).getValue(), 'A editada');
   const rest = ctx.eliminarRegistro(a.id);
   igual(rest.recientes.map((r) => r.id), [b.id]);
   assert.throws(() => ctx.guardarRegistro(Object.assign({}, a, { id: 'noexiste' })), /No se encontró/);
@@ -153,66 +204,78 @@ prueba('editar y eliminar conservan la fila correcta', () => {
 
 prueba('totales se recalculan si se editan montos directo en la hoja', () => {
   const ctx = nuevoEntorno();
-  ctx.guardarRegistro({ fecha: '2026-10-01', paciente: 'A', tipo: 'Control', ubicacion: 'Escazú', pago1: 22000, forma1: 'SINPE' });
-  hoja(ctx, 'Registros').getRange(2, 11).setValue(25000);
-  assert.strictEqual(ctx.getReporteMes('2026-10').totales.facturado, 25000);
+  ctx.guardarRegistro({ fecha: '2026-10-01', paciente: 'A', tipo: 'Control', ubicacion: 'Escazú', pago1: 35000, forma1: 'SINPE' });
+  hoja(ctx, 'Registros').getRange(2, col(ctx, 'Pago 1')).setValue(40000);
+  assert.strictEqual(ctx.getReporteMes('2026-10').totales.facturado, 40000);
 });
 
-prueba('reporte del mes: comisiones por sede, aseguradoras y formas de pago', () => {
-  const ctx = nuevoEntorno();
-  configurarMontos(ctx);
+/** Mes de ejemplo con las reglas reales. */
+function mesDeEjemplo(ctx) {
   const g = (d) => ctx.guardarRegistro(Object.assign({ hora: '10:00', forma1: 'SINPE' }, d));
-  g({ fecha: '2026-10-01', paciente: 'A', tipo: 'Primera vez', ubicacion: 'Escazú', pago1: 30000 });
-  g({ fecha: '2026-10-02', paciente: 'B', tipo: 'Control', ubicacion: 'Escazú', pago1: 4000, conSeguro: true, aseguradora: 'Sana Sana', montoAseguradora: 18000 });
-  g({ fecha: '2026-10-03', paciente: 'C', tipo: 'Control', ubicacion: 'Curridabat', pago1: 25000, forma1: 'Efectivo' });
-  g({ fecha: '2026-10-04', paciente: 'D', paciente2: 'E', tipo: 'Pareja control', ubicacion: 'Domicilio', dosPagos: true, pago1: 20000, pago2: 20000, forma2: 'Tarjeta' });
+  g({ fecha: '2026-10-01', paciente: 'A', tipo: 'Primera vez', ubicacion: 'Escazú', pago1: 50000 });
+  g({ fecha: '2026-10-02', paciente: 'B', tipo: 'Control', ubicacion: 'Escazú', pago1: 16000, conSeguro: true, aseguradora: 'Sana Sana', montoAseguradora: 8500 });
+  g({ fecha: '2026-10-03', paciente: 'C', tipo: 'Control', ubicacion: 'Curridabat', pago1: 30000, forma1: 'Tarjeta' });
+  g({ fecha: '2026-10-04', paciente: 'D', paciente2: 'E', tipo: 'Pareja control', ubicacion: 'Domicilio', descuento: 'VOLK',
+    dosPagos: true, pago1: 22500, pago2: 22500, forma2: 'Tarjeta' });
   g({ fecha: '2026-11-01', paciente: 'F', tipo: 'Control', ubicacion: 'Escazú', pago1: 99999 });
+}
 
+prueba('reporte del mes: parte de cada sede, de Moni y por colaboradora', () => {
+  const ctx = nuevoEntorno();
+  mesDeEjemplo(ctx);
   const r = ctx.getReporteMes('2026-10');
   sinFechas(r);
   assert.strictEqual(r.etiqueta, 'Octubre 2026');
-  assert.strictEqual(r.totales.consultas, 4);
-  assert.strictEqual(r.totales.personas, 5);
-  assert.strictEqual(r.totales.facturado, 30000 + 22000 + 25000 + 40000);
-  const esc = r.ubicaciones.find((u) => u.nombre === 'Escazú');
-  assert.strictEqual(esc.facturado, 52000);
-  assert.strictEqual(esc.comision, 10400); // 20% del total facturado
-  const cur = r.ubicaciones.find((u) => u.nombre === 'Curridabat');
-  assert.strictEqual(cur.comision, 3750); // 15%
-  assert.strictEqual(r.totales.comisiones, 14150);
-  assert.strictEqual(r.totales.porCobrar, 18000);
-  igual(r.formas.map((f) => [f.nombre, f.monto]), [['Efectivo', 25000], ['SINPE', 54000], ['Tarjeta', 20000]]);
+  const t = r.totales;
+  igual([t.consultas, t.personas, t.facturado, t.descuentos, t.porCobrar], [4, 5, 149500, 5000, 8500]);
+  igual(r.ubicaciones.map((u) => [u.nombre, u.facturado, u.comision, u.nutricionista]), [
+    ['Escazú', 74500, 29800, 44700],
+    ['Curridabat', 30000, 12000, 18000],
+    ['Domicilio', 45000, 9000, 36000],
+  ]);
+  assert.strictEqual(t.comisiones, 50800);
+  assert.strictEqual(t.neto, 98700);
+  igual(r.encargados.map((e) => [e.nombre, e.ubicaciones, e.consultas, e.comision]), [
+    ['Andrea (DS · Diseñando tu Salud)', ['Escazú', 'Domicilio'], 3, 38800],
+    ['Raque', ['Curridabat'], 1, 12000],
+  ]);
+  igual(r.formas.map((f) => [f.nombre, f.monto]), [['SINPE', 88500], ['Tarjeta', 52500]]);
 
   // Base "Pago paciente" en Escazú: la comisión no incluye lo de la aseguradora
   hoja(ctx, 'Ubicaciones').getRange(2, 4).setValue('Pago paciente');
-  assert.strictEqual(ctx.getReporteMes('2026-10').ubicaciones[0].comision, 6800);
+  assert.strictEqual(ctx.getReporteMes('2026-10').ubicaciones[0].comision, 26400);
+  hoja(ctx, 'Ubicaciones').getRange(2, 4).setValue('Total facturado');
 
   const m = ctx.marcarEstadoAseguradora('2026-10', 'Sana Sana', 'Pendiente', 'Facturado');
   assert.strictEqual(m.cambiados, 1);
-  assert.strictEqual(m.reporte.aseguradoras[0].Facturado, 18000);
-  assert.strictEqual(m.reporte.totales.porCobrar, 18000);
+  assert.strictEqual(m.reporte.aseguradoras[0].Facturado, 8500);
+  assert.strictEqual(m.reporte.totales.porCobrar, 8500);
   ctx.marcarEstadoAseguradora('2026-10', 'Sana Sana', 'Facturado', 'Pagado');
   assert.strictEqual(ctx.getReporteMes('2026-10').totales.porCobrar, 0);
 });
 
-prueba('exportar reportes crea hojas con datos', () => {
+prueba('exportar reportes: general, sede, colaboradora y aseguradora', () => {
   const ctx = nuevoEntorno();
-  configurarMontos(ctx);
-  ctx.guardarRegistro({ fecha: '2026-10-02', paciente: 'B', tipo: 'Control', ubicacion: 'Curridabat', pago1: 4000, forma1: 'SINPE', conSeguro: true, aseguradora: 'Sana Sana', montoAseguradora: 18000 });
-  ['general', 'sede', 'aseguradora'].forEach((tipo, i) => {
-    const filtro = { sede: 'Curridabat', aseguradora: 'Sana Sana' }[tipo];
-    const r = ctx.exportarReporte({ tipo, mes: '2026-10', filtro, nombres: true });
-    assert.ok(r.pdf.includes('format=pdf'));
+  mesDeEjemplo(ctx);
+  const texto = (i) => {
     const sh = ctx._creados[i].getSheets()[0];
-    const texto = JSON.stringify(sh.getRange(1, 1, sh.getLastRow(), 7).getValues());
-    assert.ok(texto.includes('Hábitos con propósito'));
-    if (tipo === 'sede') assert.ok(texto.includes('Monto a pagar a Encargado Curridabat') && texto.includes('3300'), texto);
-    if (tipo === 'aseguradora') assert.ok(texto.includes('"B"') && texto.includes('18000'));
+    return JSON.stringify(sh.getRange(1, 1, sh.getLastRow(), 8).getValues());
+  };
+  const casos = [
+    [{ tipo: 'general' }, ['Monto para Moni', '98700', 'Pagos a colaboradoras', '38800']],
+    [{ tipo: 'sede', filtro: 'Curridabat' }, ['Monto a pagar a Raque', '12000', 'Monto para Moni', '18000']],
+    [{ tipo: 'encargado', filtro: 'Andrea (DS · Diseñando tu Salud)' }, ['Total a pagar a Andrea', '38800', '"Domicilio"', '(VOLK)']],
+    [{ tipo: 'aseguradora', filtro: 'Sana Sana' }, ['"B"', '8500', 'Total a cobrar a Sana Sana']],
+  ];
+  casos.forEach(([opc, esperado], i) => {
+    const r = ctx.exportarReporte(Object.assign({ mes: '2026-10', nombres: true }, opc));
+    assert.ok(r.pdf.includes('format=pdf'));
+    const tx = texto(i);
+    assert.ok(tx.includes('Hábitos con propósito'));
+    esperado.forEach((e) => assert.ok(tx.includes(e), opc.tipo + ': falta ' + e + '\n' + tx));
   });
-  const sinNombres = ctx.exportarReporte({ tipo: 'sede', mes: '2026-10', filtro: 'Curridabat', nombres: false });
-  const sh = ctx._creados[3].getSheets()[0];
-  assert.ok(!JSON.stringify(sh.getRange(1, 1, sh.getLastRow(), 7).getValues()).includes('"B"'));
-  assert.ok(sinNombres.url);
+  assert.ok(ctx.exportarReporte({ tipo: 'encargado', filtro: 'Raque', mes: '2026-10', nombres: false }).nombre.includes('Liquidación Raque'));
+  assert.ok(!texto(4).includes('"C"'), 'sin nombres de pacientes');
 });
 
 prueba('eventos de Google: sugerencias de paciente, tipo y ubicación', () => {
