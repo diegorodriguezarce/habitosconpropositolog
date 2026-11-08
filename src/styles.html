@@ -11,7 +11,6 @@
     --amarillo: #F4D978;
     --amarillo-suave: #FBF0C6;
     --gris-verde: #939A85;
-    --logo-claro: #C5D597;
     --texto: #2A2B26;
     --muted: #6E6C64;
     --rojo: #A84A2A;
@@ -54,16 +53,10 @@
     padding: 18px 16px 6px;
     display: flex; flex-direction: column; gap: 12px;
   }
-  .logo { font-family: var(--fuente-logo); line-height: .95; letter-spacing: -.2px; }
-  .logo-1 { display: block; color: var(--oscuro); font-size: 30px; }
-  .logo-2 { display: block; color: var(--logo-claro); font-size: 30px; }
-  /* El punto de la i es un círculo amarillo, como en el logo */
-  .i-sol { position: relative; display: inline-block; }
-  .i-sol::after {
-    content: ''; position: absolute; left: 50%; top: .02em; transform: translateX(-50%);
-    width: .34em; height: .34em; border-radius: 50%; background: var(--amarillo);
-    box-shadow: 0 0 0 .06em var(--crema);
-  }
+  .logo { line-height: 0; }
+  /* Logo oficial (assets/logo.png incrustado en index.html) */
+  .logo-img { display: block; width: 210px; height: auto; }
+
   .saludo { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
 
   .tabs {
@@ -77,7 +70,7 @@
     font-family: var(--fuente-titulo); font-weight: 600; font-size: 14px; color: var(--oscuro);
   }
   .tab.activa { background: var(--oscuro); color: var(--crema); }
-  .tab { white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+  .tab { white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; gap: 5px; position: relative; flex: 1 1 auto; min-width: 0; }
   .tab-badge {
     min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; font-size: 11.5px; line-height: 20px;
     background: var(--amarillo); color: var(--oscuro); font-weight: 700;
@@ -313,7 +306,8 @@
   /* ───────── Responsive ───────── */
   @media (min-width: 900px) {
     .topbar { max-width: 1120px; flex-direction: row; align-items: center; justify-content: space-between; padding-top: 24px; }
-    .tabs { width: 380px; }
+    .tabs { width: 470px; }
+    .logo-img { width: 250px; }
     .titulo { font-size: 30px; }
   }
   @media (max-width: 860px) {
@@ -321,10 +315,12 @@
     .grid2 { grid-template-columns: minmax(0, 1fr); }
   }
   @media (max-width: 520px) {
-    .tab { font-size: 13px; padding: 9px 4px; }
+    .tabs { gap: 2px; }
+    .tab { font-size: 12.5px; padding: 9px 7px; }
+    .tab-badge { position: absolute; top: -7px; right: -3px; min-width: 18px; height: 18px; line-height: 18px; font-size: 10.5px; padding: 0 5px; box-shadow: 0 0 0 2px var(--papel); }
     .agenda-nav input { width: 132px; }
     .pago { grid-template-columns: minmax(0, 1fr); gap: 0; }
-    .logo-1, .logo-2 { font-size: 26px; }
+    .logo-img { width: 190px; }
     .titulo { font-size: 23px; }
     .kpi-valor { font-size: 19px; }
     .btn { padding: 12px 16px; }

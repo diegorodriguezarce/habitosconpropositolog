@@ -325,7 +325,7 @@
     $('#paciente').scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
-  /* ───────── Pendientes de cargar ───────── */
+  /* ───────── Citas no registradas (pendientes de registrar en la bitácora) ───────── */
   async function cargarPendientes() {
     try {
       const r = await api('getPendientes');
@@ -349,9 +349,9 @@
     badge.textContent = n > 99 ? '99+' : String(n);
     badge.classList.toggle('oculto', !n);
     $('#pendSub').textContent = n
-      ? (n === 1 ? '1 cita' : n + ' citas') + ' del calendario de los últimos ' + S.pendDias +
-        ' días que todavía no están en la bitácora. Toque una para registrarla, o márquelas si no se registran.'
-      : '✓ Todo al día: no hay citas pasadas sin registrar en los últimos ' + S.pendDias + ' días.';
+      ? 'Pendientes de registrar en la bitácora: ' + (n === 1 ? '1 cita' : n + ' citas') + ' del calendario de los últimos ' +
+        S.pendDias + ' días. Toque una para registrarla, o márquelas si no se registran (cancelada, no vino…).'
+      : '✓ Todo al día: no hay citas sin registrar en la bitácora (últimos ' + S.pendDias + ' días).';
     $('#cardPendLista').classList.toggle('oculto', !n && !error);
     $('#pendTodosWrap').classList.toggle('oculto', n < 2);
     $('#pendLista').innerHTML = S.pendientes.map((e, i) =>
