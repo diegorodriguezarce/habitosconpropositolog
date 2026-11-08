@@ -33,6 +33,15 @@
         <span id="tituloForm">Nueva</span> <span class="pill">consulta</span>
       </h1>
 
+      <div class="card card-pend oculto" id="cardPendientes">
+        <button type="button" class="pend-head" id="btnPendientes" aria-expanded="false">
+          <span class="pend-badge" id="pendCount">0</span>
+          <span class="pend-texto"><strong id="pendTitulo">Por registrar</strong><span class="sutil" id="pendSub"></span></span>
+          <span class="pend-flecha" aria-hidden="true">›</span>
+        </button>
+        <div class="pend-lista oculto" id="pendLista"></div>
+      </div>
+
       <div class="card" id="cardAgenda">
         <div class="card-head">
           <h2>Citas del día</h2>
@@ -223,6 +232,17 @@
         <button type="button" class="btn btn-sec" id="modalNo">Cancelar</button>
         <button type="button" class="btn btn-pri" id="modalSi">Sí</button>
       </div>
+    </div>
+  </div>
+  <div class="modal oculto" id="modalMotivo" role="dialog" aria-modal="true">
+    <div class="modal-caja">
+      <p id="motivoTexto">¿Por qué no se registra esta cita?</p>
+      <div class="motivos">
+        <button type="button" class="btn btn-sec" data-motivo="No se presentó">No se presentó</button>
+        <button type="button" class="btn btn-sec" data-motivo="Cancelada o reprogramada">Cancelada o reprogramada</button>
+        <button type="button" class="btn btn-sec" data-motivo="No es consulta">No es una consulta</button>
+      </div>
+      <div class="acciones"><button type="button" class="btn-link" id="motivoCancelar">Cancelar</button></div>
     </div>
   </div>
   <div class="cargando" id="cargando"><div class="spinner"></div></div>

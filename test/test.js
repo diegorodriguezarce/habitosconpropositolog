@@ -46,7 +46,8 @@ prueba('setup crea las hojas con tarifas, comisiones, seguro y descuento inicial
   const ctx = nuevoEntorno();
   ctx.setup();
   const nombres = ctx._libro.getSheets().map((h) => h.getName());
-  igual(nombres, ['Registros', 'Tarifas', 'Ubicaciones', 'Aseguradoras', 'Descuentos', 'Tipos de cita', 'Formas de pago', 'Config']);
+  igual(nombres, ['Registros', 'Tarifas', 'Ubicaciones', 'Aseguradoras', 'Descuentos', 'Tipos de cita', 'Formas de pago', 'Config',
+    'Eventos descartados']);
   const t = hoja(ctx, 'Tarifas');
   igual(t.getRange(1, 1, 6, 4).getValues(), [
     ['Tipo de cita', 'Escazú', 'Curridabat', 'Domicilio'],
@@ -58,7 +59,7 @@ prueba('setup crea las hojas con tarifas, comisiones, seguro y descuento inicial
   ]);
   const reg = hoja(ctx, 'Registros');
   assert.strictEqual(reg.getRange(1, 1, 1, reg.getLastColumn()).getValues()[0].length, 24);
-  assert.strictEqual(hoja(ctx, 'Config').getLastRow(), 6, 'Config no debe duplicar claves');
+  assert.strictEqual(hoja(ctx, 'Config').getLastRow(), 7, 'Config no debe duplicar claves');
   igual(hoja(ctx, 'Formas de pago').getRange(2, 1, 2, 1).getValues(), [['SINPE'], ['Tarjeta']]);
   igual(hoja(ctx, 'Ubicaciones').getRange(2, 1, 3, 3).getValues(), [
     ['Escazú', 'Andrea R.', 0.4],
@@ -367,6 +368,42 @@ prueba('un calendario por sede: la ubicación sale del calendario', () => {
   assert.ok(r.error.includes('Domicilio que no existe'), 'avisa del calendario que no encuentra');
   // Con calendarios por sede ya no se lee el principal
   assert.ok(!r.eventos.some((e) => e.titulo === 'Gimnasio'));
+});
+
+prueba('por registrar: citas pasadas que faltan, sin las registradas, importadas ni descartadas', () => {
+  const ctx = nuevoEntorno();
+  const cfg = hoja(ctx, 'Config');
+  const fila = cfg.getRange(1, 1, cfg.getLastRow(), 1).getValues().findIndex((r) => r[0] === 'Días hacia atrás para pendientes') + 1;
+  cfg.getRange(fila, 2).setValue(3);
+  const iso = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  const hoy = new Date();
+  const ayer = iso(new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() - 1));
+  const antier = iso(new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() - 2));
+
+  const r = ctx.getPendientes();
+  assert.strictEqual(r.dias, 3);
+  sinFechas(r);
+  assert.ok(r.pendientes.every((e) => e.inicioMs <= Date.now()), 'solo citas que ya empezaron');
+  assert.strictEqual(r.pendientes[0].fecha >= r.pendientes[r.pendientes.length - 1].fecha, true, 'lo más reciente primero');
+  const deAyer = r.pendientes.filter((e) => e.fecha === ayer);
+  assert.strictEqual(deAyer.length, 6);
+
+  // 1) registrada desde el calendario (con ID de evento)
+  const maria = deAyer.find((e) => e.hora === '08:00');
+  ctx.guardarRegistro({ fecha: ayer, paciente: maria.paciente, tipo: 'Control', ubicacion: 'Escazú', pago1: 35000, forma1: 'SINPE', eventoId: maria.id });
+  // 2) importada del Excel: sin ID de evento, mismo día y mismo nombre (más completo)
+  ctx.guardarRegistro({ fecha: ayer, paciente: 'Laura Jiménez Mora', tipo: 'Primera vez', ubicacion: 'Escazú', pago1: 50000, forma1: 'SINPE' });
+  // 3) descartada: no es una consulta
+  const gym = deAyer.find((e) => e.titulo === 'Gimnasio');
+  const tras = ctx.descartarEvento(gym, 'No es consulta');
+  const quedan = tras.pendientes.filter((e) => e.fecha === ayer).map((e) => e.hora);
+  igual(quedan, ['16:00', '14:00', '11:00']);
+  // El mismo nombre en otro día no cuenta como registrado
+  assert.ok(tras.pendientes.some((e) => e.fecha === antier && e.paciente === 'Laura Jiménez'));
+  // En "Citas del día" la descartada se marca y las registradas salen con ✓
+  const dia = ctx.getEventos(ayer).eventos;
+  assert.strictEqual(dia.find((e) => e.titulo === 'Gimnasio').descartado, 'No es consulta');
+  assert.strictEqual(dia.find((e) => e.hora === '09:30').registrado, true);
 });
 
 function pick(e) {

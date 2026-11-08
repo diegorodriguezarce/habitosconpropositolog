@@ -163,18 +163,27 @@
   function crearEntornoGAS() {
     const libro = new Libro('Bitácora');
     const creados = [];
-    const calendario = { getId: () => 'principal@demo', getEvents: (ini) => eventosDemo(ini) };
+    // Como CalendarApp: devuelve las citas de todos los días del rango [ini, fin).
+    const enRango = (porDia) => (ini, fin) => {
+      const out = [];
+      const hasta = fin || new Date(ini.getFullYear(), ini.getMonth(), ini.getDate() + 1);
+      for (let d = new Date(ini.getFullYear(), ini.getMonth(), ini.getDate()); d < hasta; d.setDate(d.getDate() + 1)) {
+        porDia(new Date(d)).forEach((e) => { if (e.getStartTime() >= ini && e.getStartTime() < hasta) out.push(e); });
+      }
+      return out;
+    };
+    const calendario = { getId: () => 'principal@demo', getEvents: enRango(eventosDemo) };
     // Calendarios adicionales para pruebas: nombre o ID → lista [hora, minuto, duración, título, lugar]
     const eventosPorCalendario = {};
     const otroCalendario = (clave) => ({
       getId: () => clave,
-      getEvents: (ini) => eventosPorCalendario[clave].map(([h, m, dur, titulo, lugar], i) => {
-        const s = new Date(ini.getFullYear(), ini.getMonth(), ini.getDate(), h, m);
+      getEvents: enRango((dia) => eventosPorCalendario[clave].map(([h, m, dur, titulo, lugar], i) => {
+        const s = new Date(dia.getFullYear(), dia.getMonth(), dia.getDate(), h, m);
         return {
           getId: () => clave + '-evt' + i, getTitle: () => titulo, getLocation: () => lugar,
           getStartTime: () => s, getEndTime: () => new Date(s.getTime() + dur * 60000), isAllDayEvent: () => false,
         };
-      }),
+      })),
     });
     const props = {};
     const icsPorUrl = {};

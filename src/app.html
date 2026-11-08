@@ -51,6 +51,8 @@
     tipoManual: false,      // la usuaria eligió el tipo: no sugerir encima
     tipoSugerido: '',
     eventos: [],
+    pendientes: [],
+    pendDias: 30,
     eventoSel: '',
     pedidoEventos: 0,
     reporte: null,
@@ -288,8 +290,9 @@
       return;
     }
     el.innerHTML = S.eventos.map((e, i) =>
-      '<button type="button" class="evento' + (e.registrado ? ' hecho' : '') + (e.id === S.eventoSel ? ' sel' : '') + '" data-i="' + i + '">' +
-        (e.registrado ? '<span class="evento-badge">✓ Registrada</span>' : '') +
+      '<button type="button" class="evento' + (e.registrado || e.descartado ? ' hecho' : '') + (e.id === S.eventoSel ? ' sel' : '') + '" data-i="' + i + '">' +
+        (e.registrado ? '<span class="evento-badge">✓ Registrada</span>'
+          : e.descartado ? '<span class="evento-badge desc">' + esc(e.descartado) + '</span>' : '') +
         '<div class="evento-hora">' + esc(e.hora) + (e.horaFin ? '–' + esc(e.horaFin) : '') +
           (e.fuente === 'iCal' ? '<span class="evento-fuente">iCal</span>' : '') + '</div>' +
         '<div class="evento-titulo">' + esc(e.titulo) + '</div>' +
@@ -313,6 +316,87 @@
     revisarPaciente();
     repartirPagos();
     $('#paciente').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  /* ───────── Por registrar ───────── */
+  async function cargarPendientes() {
+    try {
+      const r = await api('getPendientes');
+      S.pendientes = r.pendientes || [];
+      S.pendDias = r.dias;
+      pintarPendientes(r.error);
+    } catch (e) {
+      $('#cardPendientes').classList.add('oculto');
+    }
+  }
+
+  function pintarPendientes(error) {
+    const card = $('#cardPendientes');
+    const n = S.pendientes.length;
+    card.classList.remove('oculto');
+    card.classList.toggle('al-dia', !n);
+    $('#pendCount').textContent = n ? n : '✓';
+    $('#pendTitulo').textContent = n ? (n === 1 ? '1 cita por registrar' : n + ' citas por registrar') : 'Todo al día';
+    $('#pendSub').textContent = n ? 'De los últimos ' + S.pendDias + ' días. Toque para verlas.'
+      : 'No hay citas pasadas sin registrar (últimos ' + S.pendDias + ' días).';
+    if (!n) abrirPendientes(false);
+    $('#pendLista').innerHTML = S.pendientes.map((e, i) =>
+      '<div class="pend-item">' +
+        '<div class="pend-info">' +
+          '<div class="pend-fecha">' + esc(fechaCorta(e.fecha)) + ' · ' + esc(e.hora) +
+            (e.ubicacion ? '<span class="tag">' + esc(e.ubicacion) + '</span>' : '') + '</div>' +
+          '<div class="pend-titulo">' + esc(e.titulo) + '</div>' +
+        '</div>' +
+        '<div class="pend-acc">' +
+          '<button type="button" class="btn-mini pri" data-i="' + i + '" data-acc="registrar">Registrar</button>' +
+          '<button type="button" class="btn-mini" data-i="' + i + '" data-acc="descartar">Descartar</button>' +
+        '</div>' +
+      '</div>').join('') + (error ? '<p class="vacio" style="padding:10px 16px">' + esc(error) + '</p>' : '');
+    $$('#pendLista button').forEach((b) => b.addEventListener('click', () => {
+      const ev = S.pendientes[+b.dataset.i];
+      if (b.dataset.acc === 'registrar') registrarPendiente(ev); else descartarPendiente(ev);
+    }));
+  }
+
+  function abrirPendientes(abrir) {
+    const abierto = abrir === undefined ? $('#pendLista').classList.contains('oculto') && S.pendientes.length > 0 : abrir;
+    $('#pendLista').classList.toggle('oculto', !abierto);
+    $('#btnPendientes').setAttribute('aria-expanded', String(abierto));
+  }
+
+  async function registrarPendiente(ev) {
+    limpiarForm(false);
+    $('#fecha').value = ev.fecha;
+    abrirPendientes(false);
+    await cargarEventos();
+    usarEvento(S.eventos.find((x) => x.id === ev.id) || ev);
+  }
+
+  function elegirMotivo(ev) {
+    return new Promise((resolve) => {
+      const m = $('#modalMotivo');
+      $('#motivoTexto').textContent = '¿Por qué no se registra la cita "' + ev.titulo + '" del ' + fechaCorta(ev.fecha) + '?';
+      m.classList.remove('oculto');
+      const cerrar = (v) => { m.classList.add('oculto'); resolve(v); };
+      $$('#modalMotivo [data-motivo]').forEach((b) => { b.onclick = () => cerrar(b.dataset.motivo); });
+      $('#motivoCancelar').onclick = () => cerrar(null);
+    });
+  }
+
+  async function descartarPendiente(ev) {
+    const motivo = await elegirMotivo(ev);
+    if (!motivo) return;
+    try {
+      const r = await api('descartarEvento', ev, motivo);
+      S.pendientes = r.pendientes || [];
+      pintarPendientes(r.error);
+      abrirPendientes(S.pendientes.length > 0);
+      toast('Cita descartada: ' + motivo.toLowerCase());
+      const enDia = S.eventos.find((x) => x.id === ev.id);
+      if (enDia) { enDia.descartado = motivo; pintarEventos(); }
+    } catch (e) {
+      toast(mensajeError(e), 'error');
+    }
   }
 
   /* ───────── Guardar / editar ───────── */
@@ -381,6 +465,7 @@
       pintarRecientes();
       const ev = S.eventos.find((x) => x.id === d.eventoId);
       if (ev) ev.registrado = true;
+      cargarPendientes();
       toast(editando ? 'Cambios guardados ✓' : 'Consulta de ' + r.registro.paciente.split(' ')[0] + ' guardada ✓');
       limpiarForm(true);
       if (editando) mostrarVista('recientes');
@@ -464,6 +549,7 @@
       cargarPacientes(r.pacientes);
       pintarRecientes();
       toast('Registro eliminado');
+      cargarPendientes();
       limpiarForm(false);
       mostrarVista('recientes');
       S.reporte = null;
@@ -635,6 +721,7 @@
     ['pago1', 'pago2'].forEach((id) => $('#' + id).addEventListener('input', actualizarResumen));
     $('#dosPagos').addEventListener('change', () => { actualizarVista(); repartirPagos(); });
     $('#btnExportar').addEventListener('click', exportar);
+    $('#btnPendientes').addEventListener('click', () => abrirPendientes());
     $('#mes').addEventListener('change', cargarReporte);
     $('#mesAnt').addEventListener('click', () => moverMes(-1));
     $('#mesSig').addEventListener('click', () => moverMes(1));
@@ -700,6 +787,7 @@
       pintarRecientes();
       actualizarVista();
       cargarEventos();
+      cargarPendientes();
     } catch (e) {
       toast('No se pudo cargar: ' + mensajeError(e), 'error');
     } finally {

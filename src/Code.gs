@@ -17,6 +17,7 @@ const HOJAS = {
   tipos: 'Tipos de cita',
   formas: 'Formas de pago',
   config: 'Config',
+  descartados: 'Eventos descartados',
 };
 
 const ESTADOS_ASEGURADORA = ['Pendiente', 'Facturado', 'Pagado'];
@@ -44,6 +45,7 @@ const CONFIG_INICIAL = [
   ['iCal (enlaces .ics)', '', 'Opcional: enlaces .ics / webcal:// de la agenda, separados por coma. Se leen directo (más actualizado que la suscripción de Google).'],
   ['Solo eventos que contengan', '', 'Opcional: muestra solo eventos cuyo título contenga este texto.'],
   ['Carpeta de reportes', 'Hábitos con propósito · Reportes', 'Carpeta de Drive donde se guardan los reportes exportados.'],
+  ['Días hacia atrás para pendientes', 30, 'Cuántos días atrás revisa la app las citas del calendario que faltan por registrar.'],
 ];
 
 /** Tarifas iniciales (por persona en pareja). Solo se cargan si la hoja Tarifas está vacía. */
@@ -157,10 +159,11 @@ function setup() {
   asegurarClavesConfig_(config);
 
   crearRegistros_(ss);
+  crearDescartados_(ss);
   sincronizarTarifas();
 
   // Orden de pestañas
-  [HOJAS.registros, HOJAS.tarifas, HOJAS.ubicaciones, HOJAS.aseguradoras, HOJAS.descuentos, HOJAS.tipos, HOJAS.formas, HOJAS.config]
+  [HOJAS.registros, HOJAS.tarifas, HOJAS.ubicaciones, HOJAS.aseguradoras, HOJAS.descuentos, HOJAS.tipos, HOJAS.formas, HOJAS.config, HOJAS.descartados]
     .forEach(function (n, i) {
       const sh = ss.getSheetByName(n);
       if (sh) { ss.setActiveSheet(sh); ss.moveActiveSheet(i + 1); }
@@ -384,8 +387,89 @@ function getEventos(fechaStr) {
   const cfg = config_();
   const cats = catalogos_();
   const avisos = [];
-  let crudos = [];
+  const regs = leerRegistros_().map(function (x) { return x.reg; });
+  const descartados = eventosDescartados_();
+  const eventos = eventosEntre_(ini, fin, cfg, cats, avisos).map(function (e) {
+    e.registrado = yaRegistrado_(e, regs);
+    e.descartado = descartados[e.id] || '';
+    return e;
+  });
+  return { eventos: eventos, error: avisos.join(' ') };
+}
 
+/**
+ * Citas de los últimos días que ya pasaron y no están en la bitácora ni descartadas.
+ * Config → "Días hacia atrás para pendientes" (30 por defecto).
+ */
+function getPendientes() {
+  const cfg = config_();
+  const cats = catalogos_();
+  const dias = Math.max(1, Math.min(120, parseInt(cfg['Días hacia atrás para pendientes'], 10) || 30));
+  const ahora = new Date();
+  const ini = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() - dias);
+  const avisos = [];
+  const regs = leerRegistros_().map(function (x) { return x.reg; });
+  const descartados = eventosDescartados_();
+  const pendientes = eventosEntre_(ini, ahora, cfg, cats, avisos)
+    .filter(function (e) { return e.inicioMs <= ahora.getTime() && !descartados[e.id] && !yaRegistrado_(e, regs); })
+    .reverse();   // lo más reciente primero
+  return { pendientes: pendientes, dias: dias, error: avisos.join(' ') };
+}
+
+/** Marca una cita del calendario como "no se registra" (no vino, cancelada, no es consulta). */
+function descartarEvento(ev, motivo) {
+  if (!ev || !ev.id) throw new Error('Falta la cita.');
+  const ss = ss_();
+  let sh = ss.getSheetByName(HOJAS.descartados);
+  if (!sh) sh = crearDescartados_(ss);
+  sh.appendRow([String(ev.id), aFecha_(ev.fecha) || '', ev.hora || '', ev.titulo || '', motivo || 'Descartada', new Date()]);
+  return getPendientes();
+}
+
+function crearDescartados_(ss) {
+  return crearCatalogo_(ss, HOJAS.descartados, ['Evento', 'Fecha', 'Hora', 'Título', 'Motivo', 'Descartado'], [],
+    [200, 90, 60, 260, 140, 130], function (sh) {
+      sh.getRange(1, 1).setNote('Citas del calendario que no se registran en la bitácora. Borre la fila para que vuelva a salir en "Por registrar".');
+      sh.getRange(2, 2, sh.getMaxRows() - 1, 1).setNumberFormat(FECHA);
+      sh.getRange(2, 3, sh.getMaxRows() - 1, 1).setNumberFormat('@');
+    });
+}
+
+function eventosDescartados_() {
+  const out = {};
+  leerTabla_(HOJAS.descartados).forEach(function (r) {
+    if (r['Evento']) out[String(r['Evento']).trim()] = String(r['Motivo'] || 'Descartada');
+  });
+  return out;
+}
+
+/**
+ * Una cita ya está en la bitácora si un registro tiene su ID de evento, o si hay un registro
+ * del mismo día con el mismo paciente (p. ej. consultas importadas del Excel, sin enlace al calendario).
+ */
+function yaRegistrado_(e, regs) {
+  return regs.some(function (r) {
+    if (r.eventoId) return r.eventoId === e.id;
+    if (r.fecha !== e.fecha) return false;
+    return [r.paciente, r.paciente2].some(function (n) {
+      return mismoNombre_(n, e.paciente) || mismoNombre_(n, e.paciente2);
+    });
+  });
+}
+
+/** Dos nombres coinciden si todas las palabras del más corto están en el más largo (sin tildes ni mayúsculas). */
+function mismoNombre_(a, b) {
+  const ta = normTxt_(a).split(' ').filter(Boolean);
+  const tb = normTxt_(b).split(' ').filter(Boolean);
+  if (!ta.length || !tb.length) return false;
+  const corto = ta.length <= tb.length ? ta : tb;
+  const largo = ta.length <= tb.length ? tb : ta;
+  return corto.every(function (t) { return largo.indexOf(t) >= 0; });
+}
+
+/** Citas (Google Calendar + iCal) entre dos fechas, ordenadas, sin duplicados y con sugerencias de llenado. */
+function eventosEntre_(ini, fin, cfg, cats, avisos) {
+  let crudos = [];
   calendarios_(cfg, cats, avisos).forEach(function (c) {
     try {
       c.cal.getEvents(ini, fin).forEach(function (e) {
@@ -411,29 +495,26 @@ function getEventos(fechaStr) {
   crudos = crudos
     .sort(function (a, b) { return a.inicio - b.inicio; })
     .filter(function (e) {
-      const k = normTxt_(e.titulo) + '|' + Utilities.formatDate(e.inicio, TZ, 'HH:mm');
+      const k = normTxt_(e.titulo) + '|' + Utilities.formatDate(e.inicio, TZ, 'yyyy-MM-dd HH:mm');
       if (vistos[k]) return false;
       vistos[k] = true;
       return true;
     });
 
   const filtro = normTxt_(cfg['Solo eventos que contengan'] || '');
-  const registrados = {};
-  leerRegistros_().forEach(function (x) { if (x.reg.eventoId) registrados[x.reg.eventoId] = true; });
-
-  const eventos = crudos
+  return crudos
     .filter(function (e) { return !filtro || normTxt_(e.titulo).indexOf(filtro) >= 0; })
     .map(function (e) {
-      const id = e.id + '|' + Utilities.formatDate(e.inicio, TZ, "yyyy-MM-dd'T'HH:mm");
       const sug = sugerirDesdeEvento_(e.titulo, e.lugar, cats);
       return {
-        id: id,
+        id: e.id + '|' + Utilities.formatDate(e.inicio, TZ, "yyyy-MM-dd'T'HH:mm"),
         titulo: e.titulo,
         lugar: e.lugar,
         fuente: e.fuente,
+        fecha: Utilities.formatDate(e.inicio, TZ, 'yyyy-MM-dd'),
         hora: Utilities.formatDate(e.inicio, TZ, 'HH:mm'),
         horaFin: e.fin ? Utilities.formatDate(e.fin, TZ, 'HH:mm') : '',
-        registrado: !!registrados[id],
+        inicioMs: e.inicio.getTime(),
         paciente: sug.paciente,
         paciente2: sug.paciente2,
         tipo: sug.tipo,
@@ -441,7 +522,6 @@ function getEventos(fechaStr) {
         ubicacion: e.ubicacion || sug.ubicacion,
       };
     });
-  return { eventos: eventos, error: avisos.join(' ') };
 }
 
 /** Crea (sin id) o actualiza (con id) un registro. */
