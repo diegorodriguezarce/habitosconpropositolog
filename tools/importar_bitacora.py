@@ -3,7 +3,13 @@ Convierte la bitácora vieja en Excel (bloques por mes y sede) al formato de la
 hoja Registros de la app.
 
 Uso:
-    python3 tools/importar_bitacora.py Bitacora.xlsx salida/ [--anio 2026]
+    python3 tools/importar_bitacora.py Bitacora.xlsx salida/ [--anio 2026] [--correcciones correcciones.json]
+
+  correcciones.json (opcional, NO va al repositorio porque tiene nombres) corrige filas del
+  Excel sin editarlo. Cada entrada busca por fecha (dd/mm) y el inicio del nombre del paciente:
+    [{"fecha": "06/11", "paciente": "Bruno Ramírez", "estado": "Confirmada", "obs": "Datáfono"},
+     {"fecha": "26/09", "paciente": "María Paula Morales", "obs_agregar": "Datáfono"}]
+  Campos: estado, cobro, sana, obs (reemplaza) u obs_agregar (se suma a Observaciones).
 
 Genera en la carpeta de salida:
   - importar.xlsx   una pestaña "Importar" con las columnas de Registros. En la hoja de
@@ -25,6 +31,7 @@ Reglas:
 import argparse
 import datetime as dt
 import hashlib
+import json
 import os
 import re
 import sys
@@ -163,12 +170,33 @@ def completar_nombre(nombre, base):
     return nombre, ''
 
 
-def convertir(ruta, anio, hoy):
+def aplicar_correcciones(crudas, correcciones, anio, avisos):
+    """Corrige filas crudas del Excel según el archivo de correcciones (ver docstring del módulo)."""
+    for c in correcciones:
+        dia, mes = [int(x) for x in c['fecha'].split('/')[:2]]
+        nombre = norm(c['paciente'])
+        hallados = [f for f in crudas if f['mes'] == mes and re.search(r'(\d{1,2})', f['fecha_txt'])
+                    and int(re.search(r'(\d{1,2})', f['fecha_txt']).group(1)) == dia
+                    and norm(f['paciente']).startswith(nombre)]
+        if len(hallados) != 1:
+            avisos.append(('', c['paciente'], 'Corrección del %s: %d filas coinciden; no se aplicó.' % (c['fecha'], len(hallados))))
+            continue
+        f = hallados[0]
+        for k in ('estado', 'cobro', 'sana', 'obs'):
+            if k in c:
+                f[k] = c[k]
+        if c.get('obs_agregar'):
+            f['obs'] = (f['obs'] + ', ' if f['obs'] else '') + c['obs_agregar']
+        f['corregida'] = True
+
+
+def convertir(ruta, anio, hoy, correcciones=None):
     wb = openpyxl.load_workbook(ruta, data_only=True)
     ws = wb['Agenda 2026'] if 'Agenda 2026' in wb.sheetnames else wb.worksheets[0]
     base = nombres_base(wb)
     registros, revisar, avisos = [], [], []
     crudas = leer_bloques(ws, avisos)
+    aplicar_correcciones(crudas, correcciones or [], anio, avisos)
     pendientes_pareja = {}
     for f in crudas:
         motivo = []
@@ -207,6 +235,8 @@ def convertir(ruta, anio, hoy):
             notas.append('Obs.: ' + obs)
         if f['extra']:
             notas.append(f['extra'])
+        if f.get('corregida'):
+            notas.append('Corregido al importar')
         if nota_nombre:
             notas.append(nota_nombre)
         if cobro and not forma:
@@ -364,8 +394,10 @@ def main():
     ap.add_argument('excel')
     ap.add_argument('salida')
     ap.add_argument('--anio', type=int, default=2026)
+    ap.add_argument('--correcciones', help='JSON con correcciones a filas del Excel')
     a = ap.parse_args()
-    registros, revisar, avisos, crudas = convertir(a.excel, a.anio, dt.date.today())
+    correcciones = json.load(open(a.correcciones, encoding='utf-8')) if a.correcciones else []
+    registros, revisar, avisos, crudas = convertir(a.excel, a.anio, dt.date.today(), correcciones)
     rx, rc = escribir(registros, revisar, avisos, cuadre(registros, crudas), a.salida)
     print('Importados: %d registros · A revisar: %d filas · Avisos: %d' % (len(registros), len(revisar), len(avisos)))
     print(rx)
