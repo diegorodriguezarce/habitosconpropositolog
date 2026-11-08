@@ -163,7 +163,19 @@
   function crearEntornoGAS() {
     const libro = new Libro('Bitácora');
     const creados = [];
-    const calendario = { getEvents: (ini) => eventosDemo(ini) };
+    const calendario = { getId: () => 'principal@demo', getEvents: (ini) => eventosDemo(ini) };
+    // Calendarios adicionales para pruebas: nombre o ID → lista [hora, minuto, duración, título, lugar]
+    const eventosPorCalendario = {};
+    const otroCalendario = (clave) => ({
+      getId: () => clave,
+      getEvents: (ini) => eventosPorCalendario[clave].map(([h, m, dur, titulo, lugar], i) => {
+        const s = new Date(ini.getFullYear(), ini.getMonth(), ini.getDate(), h, m);
+        return {
+          getId: () => clave + '-evt' + i, getTitle: () => titulo, getLocation: () => lugar,
+          getStartTime: () => s, getEndTime: () => new Date(s.getTime() + dur * 60000), isAllDayEvent: () => false,
+        };
+      }),
+    });
     const props = {};
     const icsPorUrl = {};
     return {
@@ -178,9 +190,10 @@
       }),
       CalendarApp: {
         getDefaultCalendar: () => calendario,
-        getCalendarById: () => calendario,
-        getCalendarsByName: () => [calendario],
+        getCalendarById: (id) => (eventosPorCalendario[id] && id.includes('@') ? otroCalendario(id) : null),
+        getCalendarsByName: (n) => (eventosPorCalendario[n] && !n.includes('@') ? [otroCalendario(n)] : []),
       },
+      _eventosPorCalendario: eventosPorCalendario,
       DriveApp: blando({
         getFoldersByName: () => ({ hasNext: () => false }),
         createFolder: () => blando({}),

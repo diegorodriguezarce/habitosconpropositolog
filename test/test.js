@@ -345,6 +345,30 @@ prueba('eventos de Google: sugerencias de paciente, tipo y ubicación', () => {
   assert.strictEqual(ctx.getEventos('2026-10-13').eventos.length, 2);
 });
 
+prueba('un calendario por sede: la ubicación sale del calendario', () => {
+  const ctx = nuevoEntorno();
+  ctx._eventosPorCalendario['Escazú HCP'] = [[9, 0, 60, 'Laura Jiménez - Control', ''], [11, 0, 60, 'Pedro Soto primera vez Curridabat', '']];
+  ctx._eventosPorCalendario['abc123@group.calendar.google.com'] = [[10, 0, 120, 'Ana y Luis pareja control', '']];
+  const u = hoja(ctx, 'Ubicaciones');
+  const cab = u.getRange(1, 1, 1, u.getLastColumn()).getValues()[0];
+  const col = cab.indexOf('Calendario') + 1;
+  assert.ok(col > 0, 'Ubicaciones tiene la columna Calendario');
+  u.getRange(2, col).setValue('Escazú HCP');
+  u.getRange(3, col).setValue('abc123@group.calendar.google.com');
+  u.getRange(4, col).setValue('Domicilio que no existe');
+
+  const r = ctx.getEventos('2026-11-10');
+  igual(r.eventos.map((e) => [e.hora, e.ubicacion, e.paciente, e.paciente2, e.tipo]), [
+    ['09:00', 'Escazú', 'Laura Jiménez', '', 'Control'],
+    ['10:00', 'Curridabat', 'Ana', 'Luis', 'Pareja control'],
+    // El calendario de la sede manda aunque el título diga otra sede
+    ['11:00', 'Escazú', 'Pedro Soto', '', 'Primera vez'],
+  ]);
+  assert.ok(r.error.includes('Domicilio que no existe'), 'avisa del calendario que no encuentra');
+  // Con calendarios por sede ya no se lee el principal
+  assert.ok(!r.eventos.some((e) => e.titulo === 'Gimnasio'));
+});
+
 function pick(e) {
   return { paciente: e.paciente, paciente2: e.paciente2, tipo: e.tipo, ubicacion: e.ubicacion };
 }

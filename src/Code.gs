@@ -40,7 +40,7 @@ const COLOR = {
 /** Claves de la hoja Config con su valor inicial. */
 const CONFIG_INICIAL = [
   ['Nutricionista', 'Moni', 'Nombre de la nutricionista (saludo de la app y su parte en los reportes).'],
-  ['Calendarios de Google', '', 'IDs o nombres de calendarios a revisar, separados por coma (incluye calendarios suscritos por iCal). Vacío = calendario principal. "ninguno" = no leer Google.'],
+  ['Calendarios de Google', '', 'Otros calendarios a revisar (sin sede), por nombre o ID, separados por coma. Los calendarios de cada sede van en Ubicaciones → Calendario. Si no hay ninguno, se lee el calendario principal. "ninguno" = no leer Google.'],
   ['iCal (enlaces .ics)', '', 'Opcional: enlaces .ics / webcal:// de la agenda, separados por coma. Se leen directo (más actualizado que la suscripción de Google).'],
   ['Solo eventos que contengan', '', 'Opcional: muestra solo eventos cuyo título contenga este texto.'],
   ['Carpeta de reportes', 'Hábitos con propósito · Reportes', 'Carpeta de Drive donde se guardan los reportes exportados.'],
@@ -111,17 +111,23 @@ function setup() {
     sh.getRange(1, 2).setNote('Sí = cita de dos personas: pide dos nombres y la tarifa se cobra por persona.');
   });
 
-  crearCatalogo_(ss, HOJAS.ubicaciones, ['Ubicación', 'Encargado / a quién se paga', '% comisión', 'Base de comisión', 'Activa'], [
-    ['Escazú', 'Andrea R.', 0.4, 'Total facturado', 'Sí'],
-    ['Curridabat', 'Raquel D.', 0.4, 'Total facturado', 'Sí'],
-    ['Domicilio', 'Andrea R.', 0.2, 'Total facturado', 'Sí'],
-  ], [130, 240, 100, 140, 70], function (sh) {
+  crearCatalogo_(ss, HOJAS.ubicaciones, ['Ubicación', 'Encargado / a quién se paga', '% comisión', 'Base de comisión', 'Activa', 'Calendario'], [
+    ['Escazú', 'Andrea R.', 0.4, 'Total facturado', 'Sí', ''],
+    ['Curridabat', 'Raquel D.', 0.4, 'Total facturado', 'Sí', ''],
+    ['Domicilio', 'Andrea R.', 0.2, 'Total facturado', 'Sí', ''],
+  ], [130, 240, 100, 140, 70, 260], function (sh) {
     sh.getRange(2, 3, sh.getMaxRows() - 1, 1).setNumberFormat('0.##%');
     sh.getRange(2, 4, sh.getMaxRows() - 1, 1).setDataValidation(
       SpreadsheetApp.newDataValidation().requireValueInList(BASES_COMISION, true).build());
     sh.getRange(1, 2).setNote('Si el mismo nombre aparece en varias ubicaciones, los reportes suman lo que se le paga en total.');
     sh.getRange(1, 3).setNote('Porcentaje que se le paga al encargado. El resto es de la nutricionista. Ej.: 40%.');
     sh.getRange(1, 4).setNote('"Total facturado" = paciente + aseguradora. "Pago paciente" = solo lo que paga el paciente.');
+    const cab = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+    const colCal = cab.indexOf('Calendario') + 1;
+    if (colCal) {
+      sh.getRange(1, colCal).setNote('Nombre (tal como aparece en Google Calendar) o ID del calendario de esta sede. ' +
+        'Las citas de ese calendario llegan a la app con la ubicación ya elegida.');
+    }
   });
 
   crearCatalogo_(ss, HOJAS.aseguradoras, ['Aseguradora', 'Monto aseguradora', 'Monto paciente', 'Ubicaciones', 'Excepto tipos', 'Activa'], [
@@ -376,15 +382,16 @@ function getEventos(fechaStr) {
   if (!ini) throw new Error('Fecha inválida.');
   const fin = new Date(ini.getFullYear(), ini.getMonth(), ini.getDate() + 1);
   const cfg = config_();
+  const cats = catalogos_();
   const avisos = [];
   let crudos = [];
 
-  calendarios_(cfg, avisos).forEach(function (cal) {
+  calendarios_(cfg, cats, avisos).forEach(function (c) {
     try {
-      cal.getEvents(ini, fin).forEach(function (e) {
+      c.cal.getEvents(ini, fin).forEach(function (e) {
         if (e.isAllDayEvent()) return;
         crudos.push({ id: e.getId(), titulo: e.getTitle(), lugar: e.getLocation() || '',
-          inicio: e.getStartTime(), fin: e.getEndTime(), fuente: 'Google' });
+          inicio: e.getStartTime(), fin: e.getEndTime(), fuente: 'Google', ubicacion: c.ubicacion });
       });
     } catch (err) {
       avisos.push('No se pudo leer un calendario de Google: ' + err.message);
@@ -413,7 +420,6 @@ function getEventos(fechaStr) {
   const filtro = normTxt_(cfg['Solo eventos que contengan'] || '');
   const registrados = {};
   leerRegistros_().forEach(function (x) { if (x.reg.eventoId) registrados[x.reg.eventoId] = true; });
-  const cats = catalogos_();
 
   const eventos = crudos
     .filter(function (e) { return !filtro || normTxt_(e.titulo).indexOf(filtro) >= 0; })
@@ -431,7 +437,8 @@ function getEventos(fechaStr) {
         paciente: sug.paciente,
         paciente2: sug.paciente2,
         tipo: sug.tipo,
-        ubicacion: sug.ubicacion,
+        // El calendario de la sede manda sobre lo que se deduce del título.
+        ubicacion: e.ubicacion || sug.ubicacion,
       };
     });
   return { eventos: eventos, error: avisos.join(' ') };
@@ -819,6 +826,7 @@ function catalogos_() {
         porcentaje: pct_(r['% comisión']),
         base: BASES_COMISION.indexOf(String(r['Base de comisión']).trim()) >= 0
           ? String(r['Base de comisión']).trim() : BASES_COMISION[0],
+        calendario: String(r['Calendario'] || '').trim(),
       };
     });
   const montoONull = function (m) { return m === '' || m == null ? null : num_(m); };
@@ -918,24 +926,36 @@ function leerTabla_(nombre) {
 /* ───────────────────────── Calendar ───────────────────────── */
 
 /**
- * Calendarios de Google a revisar (Config → "Calendarios de Google", separados por coma).
- * Vacío = calendario principal. "ninguno" = no leer Google (solo iCal).
+ * Calendarios de Google a revisar, cada uno con su sede si la tiene:
+ *  - Ubicaciones → columna "Calendario": las citas de ese calendario son de esa sede.
+ *  - Config → "Calendarios de Google": otros calendarios, separados por coma (sin sede).
+ * Si no hay ninguno configurado se lee el calendario principal. "ninguno" = no leer Google (solo iCal).
  */
-function calendarios_(cfg, avisos) {
-  const lista = listaConfig_(cfg['Calendarios de Google']);
-  if (!lista.length) lista.push('principal');
+function calendarios_(cfg, cats, avisos) {
+  const pedidos = cats.ubicaciones
+    .filter(function (u) { return u.calendario; })
+    .map(function (u) { return { nombre: u.calendario, ubicacion: u.nombre }; });
+  listaConfig_(cfg['Calendarios de Google']).forEach(function (v) { pedidos.push({ nombre: v, ubicacion: '' }); });
+  if (!pedidos.length) pedidos.push({ nombre: 'principal', ubicacion: '' });
+
   const out = [];
-  lista.forEach(function (v) {
-    const n = normTxt_(v);
+  const vistos = {};
+  pedidos.forEach(function (p) {
+    const n = normTxt_(p.nombre);
     if (n === 'ninguno') return;
     try {
       const cal = n === 'principal'
         ? CalendarApp.getDefaultCalendar()
-        : CalendarApp.getCalendarById(v) || CalendarApp.getCalendarsByName(v)[0];
-      if (cal) out.push(cal);
-      else avisos.push('No se encontró el calendario "' + v + '".');
+        : CalendarApp.getCalendarById(p.nombre) || CalendarApp.getCalendarsByName(p.nombre)[0];
+      if (!cal) {
+        avisos.push('No se encontró el calendario "' + p.nombre + '"' + (p.ubicacion ? ' (' + p.ubicacion + ')' : '') + '.');
+        return;
+      }
+      if (vistos[cal.getId()]) return;
+      vistos[cal.getId()] = true;
+      out.push({ cal: cal, ubicacion: p.ubicacion });
     } catch (err) {
-      avisos.push('No se pudo abrir el calendario "' + v + '": ' + err.message);
+      avisos.push('No se pudo abrir el calendario "' + p.nombre + '": ' + err.message);
     }
   });
   return out;

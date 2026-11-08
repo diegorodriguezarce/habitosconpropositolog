@@ -85,7 +85,8 @@ clasp push
 
 En la hoja **Config**:
 
-- **Calendarios de Google**: vacío usa el calendario principal. Se pueden poner varios IDs o nombres separados por coma, incluidos los calendarios suscritos a un iCal (en Google Calendar: *Configuración → el calendario → ID del calendario*). Con `ninguno` no se lee Google.
+- **Un calendario por sede**: en la hoja **Ubicaciones → Calendario**, ponga el nombre (tal como aparece en Google Calendar) o el ID del calendario de cada sede. Las citas de ese calendario llegan con la ubicación ya elegida.
+- **Calendarios de Google** (Config): otros calendarios sin sede. Si no hay ninguno configurado (ni aquí ni en Ubicaciones), se usa el calendario principal. Se pueden poner varios IDs o nombres separados por coma, incluidos los calendarios suscritos a un iCal (en Google Calendar: *Configuración → el calendario → ID del calendario*). Con `ninguno` no se lee Google.
 - **iCal (enlaces .ics)**: enlaces `https://…ics` o `webcal://…` de la agenda, separados por coma. El app los lee directo, así que las citas nuevas aparecen al instante (una suscripción en Google Calendar puede tardar varias horas en actualizarse). Si una cita viene por Google y por iCal a la vez, se muestra una sola vez.
 - **Solo eventos que contengan**: opcional, para ocultar eventos personales.
 

@@ -293,7 +293,8 @@
         '<div class="evento-hora">' + esc(e.hora) + (e.horaFin ? '–' + esc(e.horaFin) : '') +
           (e.fuente === 'iCal' ? '<span class="evento-fuente">iCal</span>' : '') + '</div>' +
         '<div class="evento-titulo">' + esc(e.titulo) + '</div>' +
-        (e.lugar ? '<div class="evento-lugar">' + esc(e.lugar) + '</div>' : '') +
+        ((e.ubicacion || e.lugar) ? '<div class="evento-lugar">' +
+          esc([e.ubicacion, norm(e.lugar) === norm(e.ubicacion) ? '' : e.lugar].filter(Boolean).join(' · ')) + '</div>' : '') +
       '</button>').join('') +
       (error ? '<p class="vacio">' + esc(error) + '</p>' : '');
     $$('.evento', el).forEach((b) => b.addEventListener('click', () => usarEvento(S.eventos[+b.dataset.i])));
