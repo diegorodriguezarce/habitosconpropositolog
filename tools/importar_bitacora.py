@@ -24,6 +24,7 @@ Reglas:
 """
 import argparse
 import datetime as dt
+import hashlib
 import os
 import re
 import sys
@@ -88,16 +89,28 @@ def forma_de(obs):
     return ''
 
 
-def leer_bloques(ws):
+def leer_bloques(ws, avisos):
     """Devuelve filas crudas con mes, sede y columnas por nombre de encabezado."""
     filas = []
     grupos = {}   # columna inicial → {'mes', 'sede', 'cols': {nombre: idx}}
     for fila in ws.iter_rows():
         valores = [c.value for c in fila]
+        nuevos = {}
         for i, v in enumerate(valores):
             m = re.match(r'^\s*(\w+)\s+(DS|Domicilio|Curridabat|Escaz[uú])\s*$', str(v or ''), re.I)
             if m and norm(m.group(1)) in MESES:
-                grupos[i] = {'mes': MESES.index(norm(m.group(1))) + 1, 'sede': SEDES[norm(m.group(2))], 'cols': None}
+                nuevos[i] = {'mes': MESES.index(norm(m.group(1))) + 1, 'sede': SEDES[norm(m.group(2))], 'cols': None}
+        if nuevos:
+            # Los bloques de una misma fila son del mismo mes: si uno dice otro mes, es un error de tipeo.
+            meses = [g['mes'] for g in nuevos.values()]
+            mayoria = max(set(meses), key=lambda x: (meses.count(x), -meses.index(x)))
+            for i, g in nuevos.items():
+                if g['mes'] != mayoria:
+                    avisos.append((fila[i].coordinate, str(valores[i]),
+                                   'El encabezado dice %s pero los demás bloques de la fila son de %s; se usó %s.'
+                                   % (MESES[g['mes'] - 1], MESES[mayoria - 1], MESES[mayoria - 1])))
+                    g['mes'] = mayoria
+            grupos.update(nuevos)
         for inicio, g in grupos.items():
             if norm(valores[inicio] if inicio < len(valores) else '') == 'fecha':
                 cols = {}
@@ -154,9 +167,8 @@ def convertir(ruta, anio, hoy):
     wb = openpyxl.load_workbook(ruta, data_only=True)
     ws = wb['Agenda 2026'] if 'Agenda 2026' in wb.sheetnames else wb.worksheets[0]
     base = nombres_base(wb)
-    crudas = leer_bloques(ws)
-
     registros, revisar, avisos = [], [], []
+    crudas = leer_bloques(ws, avisos)
     pendientes_pareja = {}
     for f in crudas:
         motivo = []
@@ -199,6 +211,12 @@ def convertir(ruta, anio, hoy):
             notas.append(nota_nombre)
         if cobro and not forma:
             avisos.append((f['celda'], nombre, 'Sin forma de pago en Observaciones; quedó vacía.'))
+        if 'regal' in norm(obs):
+            avisos.append((f['celda'], nombre, 'Dice "Regalía" pero el Cobro es %d; se importó con ese monto.' % cobro))
+        en_obs = re.search(r'\((\d+)\s*mil\)', norm(obs))
+        if en_obs and int(en_obs.group(1)) * 1000 != cobro:
+            avisos.append((f['celda'], nombre, 'Observaciones dice %s mil pero el Cobro es %d; se usó el Cobro.'
+                           % (en_obs.group(1), cobro)))
 
         reg = {
             'fecha': fecha, 'hora': '', 'paciente': nombre, 'paciente2': '', 'tipo': tipo, 'ubicacion': f['sede'],
@@ -210,9 +228,18 @@ def convertir(ruta, anio, hoy):
         }
 
         if tipo.startswith('Pareja'):
-            clave = (fecha, f['sede'], tipo)
-            if clave in pendientes_pareja:
+            # Se une con la fila anterior de la misma sede y tipo si las fechas difieren a lo sumo un día.
+            clave = (f['sede'], tipo)
+            previa = pendientes_pareja.get(clave)
+            if previa and abs((previa['fecha'] - fecha).days) > 1:
+                avisos.append((previa['celda'], previa['paciente'], 'Cita de pareja sin segunda persona confirmada; revisar.'))
+                pendientes_pareja.pop(clave)
+                previa = None
+            if previa:
                 p = pendientes_pareja.pop(clave)
+                if p['fecha'] != fecha:
+                    avisos.append((reg['celda'], reg['paciente'], 'Pareja con fechas distintas (%s y %s); se usó %s.'
+                                   % (p['fecha'].strftime('%d/%m'), fecha.strftime('%d/%m'), p['fecha'].strftime('%d/%m'))))
                 p['paciente2'] = reg['paciente']
                 p['pago2'] = reg['pago1']
                 p['forma2'] = reg['forma1']
@@ -225,7 +252,7 @@ def convertir(ruta, anio, hoy):
         registros.append(reg)
 
     for reg in pendientes_pareja.values():
-        avisos.append((reg['celda'], reg['paciente'], 'Cita de pareja sin segunda persona confirmada el mismo día; revisar.'))
+        avisos.append((reg['celda'], reg['paciente'], 'Cita de pareja sin segunda persona confirmada; revisar.'))
 
     # Tarifas de lista y descuento, igual que la app
     for r in registros:
@@ -243,8 +270,10 @@ def convertir(ruta, anio, hoy):
         r['totalFacturado'] = r['totalPaciente'] + (r['montoAseguradora'] or 0)
     registros.sort(key=lambda r: (r['fecha'], r['ubicacion']))
     ahora = dt.datetime.now().replace(microsecond=0)
-    for i, r in enumerate(registros, 1):
-        r['id'] = 'H%04d' % i
+    for r in registros:
+        # ID estable: el mismo registro tiene el mismo ID aunque el Excel crezca, así reimportar no duplica.
+        clave = '|'.join([r['fecha'].isoformat(), r['ubicacion'], norm(r['paciente']), r['tipo']])
+        r['id'] = 'H' + hashlib.sha1(clave.encode()).hexdigest()[:7]
         r['creado'] = r['modificado'] = ahora
         r['eventoId'] = ''
         r['notas'] = ' · '.join(r['notas'])
