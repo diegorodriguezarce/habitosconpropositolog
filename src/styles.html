@@ -11,6 +11,7 @@
     --amarillo: #F4D978;
     --amarillo-suave: #FBF0C6;
     --gris-verde: #939A85;
+    --logo-claro: #C5D597;
     --texto: #2A2B26;
     --muted: #6E6C64;
     --rojo: #A84A2A;
@@ -54,8 +55,15 @@
     display: flex; flex-direction: column; gap: 12px;
   }
   .logo { font-family: var(--fuente-logo); line-height: .95; letter-spacing: -.2px; }
-  .logo-1 { display: block; color: var(--gris-verde); font-size: 30px; }
-  .logo-2 { display: block; color: var(--salvia); font-size: 30px; }
+  .logo-1 { display: block; color: var(--oscuro); font-size: 30px; }
+  .logo-2 { display: block; color: var(--logo-claro); font-size: 30px; }
+  /* El punto de la i es un círculo amarillo, como en el logo */
+  .i-sol { position: relative; display: inline-block; }
+  .i-sol::after {
+    content: ''; position: absolute; left: 50%; top: .02em; transform: translateX(-50%);
+    width: .34em; height: .34em; border-radius: 50%; background: var(--amarillo);
+    box-shadow: 0 0 0 .06em var(--crema);
+  }
   .saludo { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
 
   .tabs {
@@ -69,6 +77,11 @@
     font-family: var(--fuente-titulo); font-weight: 600; font-size: 14px; color: var(--oscuro);
   }
   .tab.activa { background: var(--oscuro); color: var(--crema); }
+  .tab { white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+  .tab-badge {
+    min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; font-size: 11.5px; line-height: 20px;
+    background: var(--amarillo); color: var(--oscuro); font-weight: 700;
+  }
 
   main { position: relative; z-index: 1; padding: 6px 16px 120px; }
   .vista { display: none; max-width: 760px; margin: 0 auto; }
@@ -157,8 +170,19 @@
   .evento {
     flex: 0 0 auto; width: 170px; text-align: left; scroll-snap-align: start;
     background: #fff; border: 1.5px solid var(--linea); border-radius: var(--radio-sm);
-    padding: 10px 12px; cursor: pointer; position: relative;
+    position: relative; display: flex; flex-direction: column; overflow: hidden;
   }
+  .evento-main { background: none; border: 0; text-align: left; padding: 10px 12px; cursor: pointer; flex: 1; width: 100%; }
+  .evento-x {
+    background: none; border: 0; border-top: 1px dashed var(--linea); padding: 7px 12px; cursor: pointer;
+    text-align: left; font-size: 12px; color: var(--muted); font-weight: 600;
+  }
+  .evento-x:hover { color: var(--rojo); background: var(--rojo-suave); }
+  .agenda-nav { display: flex; align-items: center; gap: 6px; }
+  .agenda-nav input { width: 150px; padding: 7px 10px; font-size: 14px; }
+  .btn-icono.sm { width: 32px; height: 36px; font-size: 18px; }
+  .agenda-dia { margin: -4px 0 10px; }
+  .agenda-dia::first-letter { text-transform: uppercase; }
   .evento:hover { border-color: var(--salvia); }
   .evento.sel { border-color: var(--oscuro); box-shadow: 0 0 0 2px var(--oscuro) inset; }
   .evento.hecho { opacity: .6; }
@@ -171,33 +195,22 @@
 
   /* Citas por registrar */
   .card-pend { padding: 0; overflow: hidden; }
-  .pend-head {
-    width: 100%; display: flex; align-items: center; gap: 12px; padding: 14px 16px;
-    background: none; border: 0; cursor: pointer; text-align: left; color: var(--oscuro);
-  }
-  .pend-badge {
-    flex: none; min-width: 34px; height: 34px; padding: 0 8px; border-radius: 999px;
-    display: inline-flex; align-items: center; justify-content: center;
-    background: var(--amarillo); color: var(--oscuro); font-family: var(--fuente-titulo); font-weight: 700; font-size: 15px;
-  }
-  .card-pend.al-dia .pend-badge { background: var(--verde-claro); }
-  .pend-texto { display: flex; flex-direction: column; flex: 1; min-width: 0; }
-  .pend-texto strong { font-family: var(--fuente-titulo); font-weight: 600; font-size: 16px; }
-  .pend-texto .sutil { margin: 0; font-size: 12.5px; }
-  .pend-flecha { font-size: 24px; color: var(--gris-verde); transition: transform .2s; }
-  .pend-head[aria-expanded=true] .pend-flecha { transform: rotate(90deg); }
-  .card-pend.al-dia .pend-flecha { visibility: hidden; }
-  .pend-lista { border-top: 1px solid var(--linea); max-height: 420px; overflow-y: auto; }
-  .pend-item { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid var(--linea); }
+  .pend-todos { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--linea); font-size: 14px; font-weight: 600; color: var(--oscuro); cursor: pointer; }
+  .pend-todos input, .pend-check { width: 20px; height: 20px; accent-color: var(--oscuro); flex: none; }
+  .pend-item .pend-info { background: none; border: 0; text-align: left; cursor: pointer; flex: 1; padding: 0; }
+  .pend-item .pend-info:hover .pend-titulo { text-decoration: underline; }
+  .pend-ir { font-size: 12px; color: var(--salvia); font-weight: 700; margin-top: 1px; }
+  .barra-pend { margin-top: 14px; }
+  .pend-lista { max-height: none; }
+  .pend-item { display: flex; gap: 12px; align-items: center; padding: 11px 16px; border-bottom: 1px solid var(--linea); }
   .pend-item:last-child { border-bottom: 0; }
   .pend-info { min-width: 0; }
   .pend-fecha { font-size: 12.5px; color: var(--muted); }
   .pend-titulo { font-weight: 600; color: var(--oscuro); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pend-acc { display: flex; gap: 6px; flex: none; }
   .btn-mini.pri { background: var(--oscuro); color: var(--crema); }
   .motivos { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
   .motivos .btn { color: var(--oscuro); text-align: left; }
-  .evento-badge.desc { background: var(--linea); color: var(--muted); }
+  .evento-badge.desc { position: static; display: inline-block; margin-bottom: 4px; background: var(--linea); color: var(--muted); }
 
   /* Barra inferior fija */
   .barra-guardar {
@@ -308,6 +321,8 @@
     .grid2 { grid-template-columns: minmax(0, 1fr); }
   }
   @media (max-width: 520px) {
+    .tab { font-size: 13px; padding: 9px 4px; }
+    .agenda-nav input { width: 132px; }
     .pago { grid-template-columns: minmax(0, 1fr); gap: 0; }
     .logo-1, .logo-2 { font-size: 26px; }
     .titulo { font-size: 23px; }

@@ -15,11 +15,12 @@
 
   <header class="topbar">
     <div class="marca">
-      <div class="logo"><span class="logo-1">Hábitos</span><span class="logo-2">con propósito</span></div>
+      <div class="logo" aria-label="Hábitos con propósito"><span class="logo-1">Háb<span class="i-sol">i</span>tos</span><span class="logo-2">con propósito</span></div>
       <p class="saludo" id="saludo"></p>
     </div>
     <nav class="tabs" role="tablist">
       <button class="tab activa" data-vista="registrar" role="tab">Registrar</button>
+      <button class="tab" data-vista="pendientes" role="tab">Pendientes<span class="tab-badge oculto" id="tabPendCount"></span></button>
       <button class="tab" data-vista="recientes" role="tab">Recientes</button>
       <button class="tab" data-vista="reportes" role="tab">Reportes</button>
     </nav>
@@ -33,20 +34,17 @@
         <span id="tituloForm">Nueva</span> <span class="pill">consulta</span>
       </h1>
 
-      <div class="card card-pend oculto" id="cardPendientes">
-        <button type="button" class="pend-head" id="btnPendientes" aria-expanded="false">
-          <span class="pend-badge" id="pendCount">0</span>
-          <span class="pend-texto"><strong id="pendTitulo">Por registrar</strong><span class="sutil" id="pendSub"></span></span>
-          <span class="pend-flecha" aria-hidden="true">›</span>
-        </button>
-        <div class="pend-lista oculto" id="pendLista"></div>
-      </div>
-
       <div class="card" id="cardAgenda">
         <div class="card-head">
           <h2>Citas del día</h2>
-          <span class="sutil" id="agendaFecha"></span>
+          <div class="agenda-nav">
+            <button type="button" class="btn-icono sm" id="diaAnt" aria-label="Día anterior">‹</button>
+            <input type="date" id="agendaFechaInput" aria-label="Fecha de las citas">
+            <button type="button" class="btn-icono sm" id="diaSig" aria-label="Día siguiente">›</button>
+            <button type="button" class="btn-mini" id="diaHoy">Hoy</button>
+          </div>
         </div>
+        <p class="sutil agenda-dia" id="agendaFecha"></p>
         <div class="eventos" id="eventos"><p class="vacio">Cargando…</p></div>
       </div>
 
@@ -164,6 +162,29 @@
         </div>
         <button type="button" class="btn-link peligro oculto" id="btnEliminar">Eliminar este registro</button>
       </form>
+    </section>
+
+    <!-- ───────────── Pendientes de cargar ───────────── -->
+    <section id="vista-pendientes" class="vista">
+      <h1 class="titulo">
+        <svg class="chispas" viewBox="0 0 44 44" aria-hidden="true"><g stroke="currentColor" stroke-width="5" stroke-linecap="round"><line x1="31" y1="4" x2="33" y2="15"/><line x1="12" y1="12" x2="20" y2="20"/><line x1="4" y1="33" x2="16" y2="32"/></g></svg>
+        Pendientes <span class="pill">de cargar</span>
+      </h1>
+      <p class="sutil" id="pendSub">Buscando citas sin registrar…</p>
+      <div class="card card-pend" id="cardPendLista">
+        <label class="pend-todos" id="pendTodosWrap"><input type="checkbox" id="pendTodos"> Seleccionar todas</label>
+        <div class="pend-lista" id="pendLista"></div>
+      </div>
+      <div class="barra-guardar barra-pend oculto" id="barraPend">
+        <div class="resumen">
+          <span class="resumen-total" id="pendSelN">0</span>
+          <span class="resumen-det">elegidas</span>
+        </div>
+        <div class="acciones">
+          <button type="button" class="btn btn-sec" id="btnPendLimpiar">Quitar</button>
+          <button type="button" class="btn btn-pri" id="btnMarcar">Marcar como…</button>
+        </div>
+      </div>
     </section>
 
     <!-- ───────────── Recientes ───────────── -->

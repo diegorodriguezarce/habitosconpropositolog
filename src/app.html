@@ -53,6 +53,7 @@
     eventos: [],
     pendientes: [],
     pendDias: 30,
+    pendSel: new Set(),
     eventoSel: '',
     pedidoEventos: 0,
     reporte: null,
@@ -270,7 +271,8 @@
     const f = val('fecha');
     if (!f) return;
     const pedido = ++S.pedidoEventos;
-    $('#agendaFecha').textContent = fechaLarga(f);
+    $('#agendaFecha').textContent = fechaLarga(f) + (f === iso(new Date()) ? ' (hoy)' : '');
+    $('#agendaFechaInput').value = f;
     $('#eventos').innerHTML = '<p class="vacio">Buscando citas…</p>';
     try {
       const r = await api('getEventos', f);
@@ -290,17 +292,22 @@
       return;
     }
     el.innerHTML = S.eventos.map((e, i) =>
-      '<button type="button" class="evento' + (e.registrado || e.descartado ? ' hecho' : '') + (e.id === S.eventoSel ? ' sel' : '') + '" data-i="' + i + '">' +
-        (e.registrado ? '<span class="evento-badge">✓ Registrada</span>'
-          : e.descartado ? '<span class="evento-badge desc">' + esc(e.descartado) + '</span>' : '') +
-        '<div class="evento-hora">' + esc(e.hora) + (e.horaFin ? '–' + esc(e.horaFin) : '') +
-          (e.fuente === 'iCal' ? '<span class="evento-fuente">iCal</span>' : '') + '</div>' +
-        '<div class="evento-titulo">' + esc(e.titulo) + '</div>' +
-        ((e.ubicacion || e.lugar) ? '<div class="evento-lugar">' +
-          esc([e.ubicacion, norm(e.lugar) === norm(e.ubicacion) ? '' : e.lugar].filter(Boolean).join(' · ')) + '</div>' : '') +
-      '</button>').join('') +
+      '<div class="evento' + (e.registrado || e.descartado ? ' hecho' : '') + (e.id === S.eventoSel ? ' sel' : '') + '">' +
+        '<button type="button" class="evento-main" data-i="' + i + '">' +
+          (e.registrado ? '<span class="evento-badge">✓ Registrada</span>'
+            : e.descartado ? '<span class="evento-badge desc">' + esc(e.descartado) + '</span>' : '') +
+          '<div class="evento-hora">' + esc(e.hora) + (e.horaFin ? '–' + esc(e.horaFin) : '') +
+            (e.fuente === 'iCal' ? '<span class="evento-fuente">iCal</span>' : '') + '</div>' +
+          '<div class="evento-titulo">' + esc(e.titulo) + '</div>' +
+          ((e.ubicacion || e.lugar) ? '<div class="evento-lugar">' +
+            esc([e.ubicacion, norm(e.lugar) === norm(e.ubicacion) ? '' : e.lugar].filter(Boolean).join(' · ')) + '</div>' : '') +
+        '</button>' +
+        (!e.registrado && !e.descartado
+          ? '<button type="button" class="evento-x" data-i="' + i + '">✕ Cancelada / no vino</button>' : '') +
+      '</div>').join('') +
       (error ? '<p class="vacio">' + esc(error) + '</p>' : '');
-    $$('.evento', el).forEach((b) => b.addEventListener('click', () => usarEvento(S.eventos[+b.dataset.i])));
+    $$('.evento-main', el).forEach((b) => b.addEventListener('click', () => usarEvento(S.eventos[+b.dataset.i])));
+    $$('.evento-x', el).forEach((b) => b.addEventListener('click', () => descartarDesdeDia(S.eventos[+b.dataset.i])));
   }
 
   async function usarEvento(ev) {
@@ -318,64 +325,74 @@
     $('#paciente').scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
-  /* ───────── Por registrar ───────── */
+  /* ───────── Pendientes de cargar ───────── */
   async function cargarPendientes() {
     try {
       const r = await api('getPendientes');
-      S.pendientes = r.pendientes || [];
-      S.pendDias = r.dias;
-      pintarPendientes(r.error);
+      recibirPendientes(r);
     } catch (e) {
-      $('#cardPendientes').classList.add('oculto');
+      $('#pendSub').textContent = 'No se pudieron leer los calendarios: ' + mensajeError(e);
     }
   }
 
+  function recibirPendientes(r) {
+    S.pendientes = r.pendientes || [];
+    S.pendDias = r.dias || S.pendDias;
+    const vigentes = new Set(S.pendientes.map((e) => e.id));
+    S.pendSel = new Set([...S.pendSel].filter((id) => vigentes.has(id)));
+    pintarPendientes(r.error);
+  }
+
   function pintarPendientes(error) {
-    const card = $('#cardPendientes');
     const n = S.pendientes.length;
-    card.classList.remove('oculto');
-    card.classList.toggle('al-dia', !n);
-    $('#pendCount').textContent = n ? n : '✓';
-    $('#pendTitulo').textContent = n ? (n === 1 ? '1 cita por registrar' : n + ' citas por registrar') : 'Todo al día';
-    $('#pendSub').textContent = n ? 'De los últimos ' + S.pendDias + ' días. Toque para verlas.'
-      : 'No hay citas pasadas sin registrar (últimos ' + S.pendDias + ' días).';
-    if (!n) abrirPendientes(false);
+    const badge = $('#tabPendCount');
+    badge.textContent = n > 99 ? '99+' : String(n);
+    badge.classList.toggle('oculto', !n);
+    $('#pendSub').textContent = n
+      ? (n === 1 ? '1 cita' : n + ' citas') + ' del calendario de los últimos ' + S.pendDias +
+        ' días que todavía no están en la bitácora. Toque una para registrarla, o márquelas si no se registran.'
+      : '✓ Todo al día: no hay citas pasadas sin registrar en los últimos ' + S.pendDias + ' días.';
+    $('#cardPendLista').classList.toggle('oculto', !n && !error);
+    $('#pendTodosWrap').classList.toggle('oculto', n < 2);
     $('#pendLista').innerHTML = S.pendientes.map((e, i) =>
       '<div class="pend-item">' +
-        '<div class="pend-info">' +
+        '<input type="checkbox" class="pend-check" data-i="' + i + '"' + (S.pendSel.has(e.id) ? ' checked' : '') +
+          ' aria-label="Seleccionar ' + esc(e.titulo) + '">' +
+        '<button type="button" class="pend-info" data-i="' + i + '">' +
           '<div class="pend-fecha">' + esc(fechaCorta(e.fecha)) + ' · ' + esc(e.hora) +
             (e.ubicacion ? '<span class="tag">' + esc(e.ubicacion) + '</span>' : '') + '</div>' +
           '<div class="pend-titulo">' + esc(e.titulo) + '</div>' +
-        '</div>' +
-        '<div class="pend-acc">' +
-          '<button type="button" class="btn-mini pri" data-i="' + i + '" data-acc="registrar">Registrar</button>' +
-          '<button type="button" class="btn-mini" data-i="' + i + '" data-acc="descartar">Descartar</button>' +
-        '</div>' +
+          '<div class="pend-ir">Registrar →</div>' +
+        '</button>' +
       '</div>').join('') + (error ? '<p class="vacio" style="padding:10px 16px">' + esc(error) + '</p>' : '');
-    $$('#pendLista button').forEach((b) => b.addEventListener('click', () => {
-      const ev = S.pendientes[+b.dataset.i];
-      if (b.dataset.acc === 'registrar') registrarPendiente(ev); else descartarPendiente(ev);
+    $$('#pendLista .pend-check').forEach((c) => c.addEventListener('change', () => {
+      const id = S.pendientes[+c.dataset.i].id;
+      if (c.checked) S.pendSel.add(id); else S.pendSel.delete(id);
+      actualizarBarraPend();
     }));
+    $$('#pendLista .pend-info').forEach((b) => b.addEventListener('click', () => registrarPendiente(S.pendientes[+b.dataset.i])));
+    actualizarBarraPend();
   }
 
-  function abrirPendientes(abrir) {
-    const abierto = abrir === undefined ? $('#pendLista').classList.contains('oculto') && S.pendientes.length > 0 : abrir;
-    $('#pendLista').classList.toggle('oculto', !abierto);
-    $('#btnPendientes').setAttribute('aria-expanded', String(abierto));
+  function actualizarBarraPend() {
+    const k = S.pendSel.size;
+    $('#barraPend').classList.toggle('oculto', !k);
+    $('#pendSelN').textContent = k;
+    $('#pendTodos').checked = k > 0 && k === S.pendientes.length;
   }
 
   async function registrarPendiente(ev) {
+    mostrarVista('registrar');
     limpiarForm(false);
     $('#fecha').value = ev.fecha;
-    abrirPendientes(false);
     await cargarEventos();
     usarEvento(S.eventos.find((x) => x.id === ev.id) || ev);
   }
 
-  function elegirMotivo(ev) {
+  function elegirMotivo(texto) {
     return new Promise((resolve) => {
       const m = $('#modalMotivo');
-      $('#motivoTexto').textContent = '¿Por qué no se registra la cita "' + ev.titulo + '" del ' + fechaCorta(ev.fecha) + '?';
+      $('#motivoTexto').textContent = texto;
       m.classList.remove('oculto');
       const cerrar = (v) => { m.classList.add('oculto'); resolve(v); };
       $$('#modalMotivo [data-motivo]').forEach((b) => { b.onclick = () => cerrar(b.dataset.motivo); });
@@ -383,20 +400,49 @@
     });
   }
 
-  async function descartarPendiente(ev) {
-    const motivo = await elegirMotivo(ev);
-    if (!motivo) return;
+  /** Marca citas como "no se registra" y actualiza la lista y las citas del día. */
+  async function descartar(evs, texto) {
+    const motivo = await elegirMotivo(texto);
+    if (!motivo) return false;
     try {
-      const r = await api('descartarEvento', ev, motivo);
-      S.pendientes = r.pendientes || [];
-      pintarPendientes(r.error);
-      abrirPendientes(S.pendientes.length > 0);
-      toast('Cita descartada: ' + motivo.toLowerCase());
-      const enDia = S.eventos.find((x) => x.id === ev.id);
-      if (enDia) { enDia.descartado = motivo; pintarEventos(); }
+      const r = await api('descartarEventos', evs, motivo);
+      evs.forEach((ev) => {
+        const enDia = S.eventos.find((x) => x.id === ev.id);
+        if (enDia) enDia.descartado = motivo;
+        S.pendSel.delete(ev.id);
+      });
+      pintarEventos();
+      recibirPendientes(r);
+      toast((evs.length === 1 ? 'Cita marcada: ' : evs.length + ' citas marcadas: ') + motivo.toLowerCase());
+      return true;
     } catch (e) {
       toast(mensajeError(e), 'error');
+      return false;
     }
+  }
+
+  function descartarDesdeDia(ev) {
+    return descartar([ev], '¿Qué pasó con la cita "' + ev.titulo + '" de las ' + ev.hora + '? No se va a registrar.');
+  }
+
+  function marcarSeleccionadas() {
+    const evs = S.pendientes.filter((e) => S.pendSel.has(e.id));
+    if (!evs.length) return;
+    return descartar(evs, evs.length === 1
+      ? '¿Qué pasó con la cita "' + evs[0].titulo + '" del ' + fechaCorta(evs[0].fecha) + '?'
+      : '¿Qué pasó con estas ' + evs.length + ' citas? Ninguna se va a registrar.');
+  }
+
+  /** Cambia el día de "Citas del día" (y la fecha del formulario). */
+  function irADia(fechaIso) {
+    $('#fecha').value = fechaIso;
+    cargarEventos();
+  }
+
+  function moverDia(delta) {
+    const d = aFecha(val('fecha') || iso(new Date()));
+    d.setDate(d.getDate() + delta);
+    irADia(iso(d));
   }
 
   /* ───────── Guardar / editar ───────── */
@@ -704,6 +750,8 @@
     $$('.vista').forEach((x) => x.classList.toggle('activa', x.id === 'vista-' + v));
     $$('.tab').forEach((x) => x.classList.toggle('activa', x.dataset.vista === v));
     if (v === 'reportes' && !S.reporte) cargarReporte();
+    if (v === 'pendientes') cargarPendientes();
+    window.scrollTo({ top: 0 });
   }
 
   /* ───────── Inicio ───────── */
@@ -721,7 +769,16 @@
     ['pago1', 'pago2'].forEach((id) => $('#' + id).addEventListener('input', actualizarResumen));
     $('#dosPagos').addEventListener('change', () => { actualizarVista(); repartirPagos(); });
     $('#btnExportar').addEventListener('click', exportar);
-    $('#btnPendientes').addEventListener('click', () => abrirPendientes());
+    $('#pendTodos').addEventListener('change', (e) => {
+      S.pendSel = new Set(e.target.checked ? S.pendientes.map((x) => x.id) : []);
+      pintarPendientes();
+    });
+    $('#btnPendLimpiar').addEventListener('click', () => { S.pendSel.clear(); pintarPendientes(); });
+    $('#btnMarcar').addEventListener('click', marcarSeleccionadas);
+    $('#diaAnt').addEventListener('click', () => moverDia(-1));
+    $('#diaSig').addEventListener('click', () => moverDia(1));
+    $('#diaHoy').addEventListener('click', () => irADia(iso(new Date())));
+    $('#agendaFechaInput').addEventListener('change', (e) => { if (e.target.value) irADia(e.target.value); });
     $('#mes').addEventListener('change', cargarReporte);
     $('#mesAnt').addEventListener('click', () => moverMes(-1));
     $('#mesSig').addEventListener('click', () => moverMes(1));
@@ -781,7 +838,8 @@
       opcionesExport();
       const hora = new Date().getHours();
       const saludo = hora < 12 ? 'Buenos días' : hora < 18 ? 'Buenas tardes' : 'Buenas noches';
-      $('#saludo').textContent = saludo + (b.nutricionista ? ', ' + b.nutricionista : '') + ' · ' + fechaLarga(b.hoy);
+      const nombre = b.encabezado || b.nutricionista;
+      $('#saludo').textContent = saludo + (nombre ? ', ' + nombre : '') + ' · ' + fechaLarga(b.hoy);
       $('#fecha').value = b.hoy;
       $('#mes').value = b.hoy.slice(0, 7);
       pintarRecientes();

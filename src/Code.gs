@@ -40,7 +40,8 @@ const COLOR = {
 
 /** Claves de la hoja Config con su valor inicial. */
 const CONFIG_INICIAL = [
-  ['Nutricionista', 'Moni', 'Nombre de la nutricionista (saludo de la app y su parte en los reportes).'],
+  ['Nutricionista', 'Moni', 'Nombre de la nutricionista en los reportes (su parte de cada sede).'],
+  ['Nombre en el encabezado', 'Doctora Moni', 'Cómo saluda la app: "Buenos días, Doctora Moni".'],
   ['Calendarios de Google', '', 'Otros calendarios a revisar (sin sede), por nombre o ID, separados por coma. Los calendarios de cada sede van en Ubicaciones → Calendario. Si no hay ninguno, se lee el calendario principal. "ninguno" = no leer Google.'],
   ['iCal (enlaces .ics)', '', 'Opcional: enlaces .ics / webcal:// de la agenda, separados por coma. Se leen directo (más actualizado que la suscripción de Google).'],
   ['Solo eventos que contengan', '', 'Opcional: muestra solo eventos cuyo título contenga este texto.'],
@@ -196,6 +197,13 @@ function crearRegistros_(ss) {
     sh.getRange(2, col, filas, 1).setNumberFormat(c.formato);
   });
   sh.setFrozenColumns(Math.max(fin.paciente + 1, 0));
+
+  // Filtro en el encabezado para poder filtrar y ordenar por cualquier columna.
+  try {
+    const filtro = sh.getFilter();
+    if (filtro && filtro.getRange().getNumColumns() < headers.length) filtro.remove();
+    if (!sh.getFilter()) sh.getRange(1, 1, sh.getMaxRows(), headers.length).createFilter();
+  } catch (e) { /* el filtro es una comodidad */ }
 
   // Listas desplegables (aceptan valores fuera de la lista, solo avisan)
   const lista = function (hoja) {
@@ -373,6 +381,7 @@ function getBootstrap() {
     recientes: recientes_(regs, 10),
     hoy: Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd'),
     nutricionista: cfg['Nutricionista'] || '',
+    encabezado: cfg['Nombre en el encabezado'] || cfg['Nutricionista'] || '',
   };
 }
 
@@ -418,12 +427,24 @@ function getPendientes() {
 
 /** Marca una cita del calendario como "no se registra" (no vino, cancelada, no es consulta). */
 function descartarEvento(ev, motivo) {
-  if (!ev || !ev.id) throw new Error('Falta la cita.');
+  return descartarEventos([ev], motivo);
+}
+
+/** Marca varias citas a la vez con el mismo motivo. */
+function descartarEventos(evs, motivo) {
+  evs = (evs || []).filter(function (e) { return e && e.id; });
+  if (!evs.length) throw new Error('Falta elegir al menos una cita.');
   const ss = ss_();
   let sh = ss.getSheetByName(HOJAS.descartados);
   if (!sh) sh = crearDescartados_(ss);
-  sh.appendRow([String(ev.id), aFecha_(ev.fecha) || '', ev.hora || '', ev.titulo || '', motivo || 'Descartada', new Date()]);
-  return getPendientes();
+  const ahora = new Date();
+  const filas = evs.map(function (ev) {
+    return [String(ev.id), aFecha_(ev.fecha) || '', ev.hora || '', ev.titulo || '', motivo || 'Descartada', ahora];
+  });
+  sh.getRange(sh.getLastRow() + 1, 1, filas.length, 6).setValues(filas);
+  const r = getPendientes();
+  r.descartadas = filas.length;
+  return r;
 }
 
 function crearDescartados_(ss) {
@@ -1400,31 +1421,22 @@ function reporteEncargado_(w, regs, cats, opc) {
   const ubics = cats.ubicaciones.filter(function (u) { return u.encargado === opc.filtro; });
   const nombresU = ubics.map(function (u) { return u.nombre; });
   const filas = regs.filter(function (r) { return nombresU.indexOf(r.ubicacion) >= 0; });
-  const conNombres = opc.nombres !== false;
-
-  w.subtitulo('Detalle de consultas');
-  const headers = ['Fecha', 'Ubicación'].concat(conNombres ? ['Paciente(s)'] : [])
-    .concat(['Tipo de cita', 'Total facturado', '%', 'A pagar']);
-  const formatos = [FECHA, '@'].concat(conNombres ? ['@'] : []).concat(['@', MONEDA, '0.##%', MONEDA]);
-  let facturado = 0;
-  let pagar = 0;
-  const rows = filas.map(function (r) {
-    const c = comisionDe_(r, cfgUbic);
-    facturado += r.totalFacturado;
-    pagar += c;
-    return [aFecha_(r.fecha), r.ubicacion].concat(conNombres ? [nombres_(r)] : [])
-      .concat([r.tipo + (r.descuento ? ' (' + r.descuento + ')' : ''), r.totalFacturado, cfgUbic[r.ubicacion].porcentaje, c]);
-  });
-  const total = ['Total', ''].concat(conNombres ? [''] : []).concat([filas.length + ' consultas', facturado, '', pagar]);
-  w.tabla(headers, rows, formatos, total);
-
-  w.subtitulo('Resumen por ubicación');
   const res = resumen_(filas, cats);
-  w.pares(res.ubicaciones.map(function (u) {
-    return [u.nombre + ' · ' + u.consultas + ' consultas · ' + Math.round(u.porcentaje * 100) + '% de ' + formatoColones_(u.facturado),
-      u.comision, MONEDA];
-  }));
-  w.destacado('Total a pagar a ' + opc.filtro, pagar, MONEDA);
+  // Solo el resumen por sede: consultas, facturado, porcentaje y monto (sin detalle de pacientes).
+  const porSede = ubics.map(function (u) {
+    return res.ubicaciones.filter(function (x) { return x.nombre === u.nombre; })[0] ||
+      { nombre: u.nombre, consultas: 0, facturado: 0, porcentaje: cfgUbic[u.nombre].porcentaje, comision: 0 };
+  });
+  const tot = porSede.reduce(function (t, u) {
+    return { consultas: t.consultas + u.consultas, facturado: t.facturado + u.facturado, comision: t.comision + u.comision };
+  }, { consultas: 0, facturado: 0, comision: 0 });
+
+  w.subtitulo('Resumen por sede');
+  w.tabla(['Sede', 'Consultas', 'Total facturado', 'Porcentaje', 'A pagar'],
+    porSede.map(function (u) { return [u.nombre, u.consultas, u.facturado, cfgUbic[u.nombre].porcentaje, u.comision]; }),
+    ['@', '0', MONEDA, '0.##%', MONEDA],
+    ['Total', tot.consultas, tot.facturado, '', tot.comision]);
+  w.destacado('Total a pagar a ' + opc.filtro, tot.comision, MONEDA);
 }
 
 function reporteAseguradora_(w, regs, opc) {

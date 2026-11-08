@@ -59,7 +59,7 @@ prueba('setup crea las hojas con tarifas, comisiones, seguro y descuento inicial
   ]);
   const reg = hoja(ctx, 'Registros');
   assert.strictEqual(reg.getRange(1, 1, 1, reg.getLastColumn()).getValues()[0].length, 24);
-  assert.strictEqual(hoja(ctx, 'Config').getLastRow(), 7, 'Config no debe duplicar claves');
+  assert.strictEqual(hoja(ctx, 'Config').getLastRow(), 8, 'Config no debe duplicar claves');
   igual(hoja(ctx, 'Formas de pago').getRange(2, 1, 2, 1).getValues(), [['SINPE'], ['Tarjeta']]);
   igual(hoja(ctx, 'Ubicaciones').getRange(2, 1, 3, 3).getValues(), [
     ['Escazú', 'Andrea R.', 0.4],
@@ -280,7 +280,8 @@ prueba('exportar reportes: general, sede, colaboradora y aseguradora', () => {
   const casos = [
     [{ tipo: 'general' }, ['Monto para Moni', '98700', '"Comisiones",50800']],
     [{ tipo: 'sede', filtro: 'Curridabat' }, ['Monto a pagar a Raquel D.', '12000', 'Monto para Moni', '18000']],
-    [{ tipo: 'encargado', filtro: 'Andrea R.' }, ['Total a pagar a Andrea R.', '38800', '"Domicilio"', '(VOLK)']],
+    [{ tipo: 'encargado', filtro: 'Andrea R.' }, ['Resumen por sede', '["Escazú",2,74500,0.4,29800', '["Domicilio",1,45000,0.2,9000',
+      '["Total",3,119500,"",38800', 'Total a pagar a Andrea R.']],
     [{ tipo: 'aseguradora', filtro: 'Sana Sana' }, ['"B"', '8500', 'Total a cobrar a Sana Sana']],
   ];
   casos.forEach(([opc, esperado], i) => {
@@ -292,6 +293,8 @@ prueba('exportar reportes: general, sede, colaboradora y aseguradora', () => {
   });
   assert.ok(ctx.exportarReporte({ tipo: 'encargado', filtro: 'Raquel D.', mes: '2026-10', nombres: false }).nombre.includes('Liquidación Raquel D.'));
   assert.ok(!texto(4).includes('"C"'), 'sin nombres de pacientes');
+  // La liquidación por persona es solo el resumen: sin detalle ni nombres de pacientes
+  assert.ok(!texto(2).includes('"A"') && !texto(2).includes('"D"') && !texto(2).includes('Detalle'));
 });
 
 prueba('importar registros desde la pestaña Importar: por nombre de columna y sin duplicar', () => {
@@ -404,6 +407,24 @@ prueba('por registrar: citas pasadas que faltan, sin las registradas, importadas
   const dia = ctx.getEventos(ayer).eventos;
   assert.strictEqual(dia.find((e) => e.titulo === 'Gimnasio').descartado, 'No es consulta');
   assert.strictEqual(dia.find((e) => e.hora === '09:30').registrado, true);
+});
+
+prueba('descartar varias citas a la vez', () => {
+  const ctx = nuevoEntorno();
+  const cfg = hoja(ctx, 'Config');
+  const fila = cfg.getRange(1, 1, cfg.getLastRow(), 1).getValues().findIndex((r) => r[0] === 'Días hacia atrás para pendientes') + 1;
+  cfg.getRange(fila, 2).setValue(2);
+  const antes = ctx.getPendientes().pendientes;
+  const elegidas = antes.slice(0, 3);
+  const r = ctx.descartarEventos(elegidas, 'Cancelada o reprogramada');
+  assert.strictEqual(r.descartadas, 3);
+  assert.strictEqual(r.pendientes.length, antes.length - 3);
+  assert.ok(!r.pendientes.some((e) => elegidas.some((x) => x.id === e.id)));
+  const d = hoja(ctx, 'Eventos descartados');
+  assert.strictEqual(d.getLastRow(), 4);
+  assert.strictEqual(d.getRange(2, 5).getValue(), 'Cancelada o reprogramada');
+  assert.throws(() => ctx.descartarEventos([], 'X'), /al menos una cita/);
+  assert.strictEqual(ctx.getBootstrap().encabezado, 'Doctora Moni');
 });
 
 function pick(e) {
