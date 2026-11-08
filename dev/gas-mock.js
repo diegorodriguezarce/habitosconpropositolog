@@ -151,6 +151,7 @@
       const e = new Date(s.getTime() + dur * 60000);
       return {
         getId: () => 'evt' + i + '@google.com',
+        getGuestList: () => [],
         getTitle: () => titulo,
         getLocation: () => lugar,
         getStartTime: () => s,
@@ -177,10 +178,11 @@
     const eventosPorCalendario = {};
     const otroCalendario = (clave) => ({
       getId: () => clave,
-      getEvents: enRango((dia) => eventosPorCalendario[clave].map(([h, m, dur, titulo, lugar], i) => {
+      getEvents: enRango((dia) => eventosPorCalendario[clave].map(([h, m, dur, titulo, lugar, invitados], i) => {
         const s = new Date(dia.getFullYear(), dia.getMonth(), dia.getDate(), h, m);
         return {
           getId: () => clave + '-evt' + i, getTitle: () => titulo, getLocation: () => lugar,
+          getGuestList: () => Array.from({ length: invitados || 0 }, (_, k) => ({ getEmail: () => 'invitado' + k + '@demo' })),
           getStartTime: () => s, getEndTime: () => new Date(s.getTime() + dur * 60000), isAllDayEvent: () => false,
         };
       })),

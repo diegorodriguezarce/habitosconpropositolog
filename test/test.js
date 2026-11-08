@@ -59,7 +59,7 @@ prueba('setup crea las hojas con tarifas, comisiones, seguro y descuento inicial
   ]);
   const reg = hoja(ctx, 'Registros');
   assert.strictEqual(reg.getRange(1, 1, 1, reg.getLastColumn()).getValues()[0].length, 24);
-  assert.strictEqual(hoja(ctx, 'Config').getLastRow(), 8, 'Config no debe duplicar claves');
+  assert.strictEqual(hoja(ctx, 'Config').getLastRow(), 9, 'Config no debe duplicar claves');
   igual(hoja(ctx, 'Formas de pago').getRange(2, 1, 2, 1).getValues(), [['SINPE'], ['Tarjeta']]);
   igual(hoja(ctx, 'Ubicaciones').getRange(2, 1, 3, 3).getValues(), [
     ['Escazú', 'Andrea R.', 0.4],
@@ -389,24 +389,77 @@ prueba('por registrar: citas pasadas que faltan, sin las registradas, importadas
   assert.ok(r.pendientes.every((e) => e.inicioMs <= Date.now()), 'solo citas que ya empezaron');
   assert.strictEqual(r.pendientes[0].fecha >= r.pendientes[r.pendientes.length - 1].fecha, true, 'lo más reciente primero');
   const deAyer = r.pendientes.filter((e) => e.fecha === ayer);
-  assert.strictEqual(deAyer.length, 6);
+  assert.strictEqual(deAyer.length, 5, '"Gimnasio" no parece cita');
+  assert.ok(r.ocultos.some((e) => e.fecha === ayer && e.titulo === 'Gimnasio' && e.noEsCita === 'Dice "gimnasio"'));
 
   // 1) registrada desde el calendario (con ID de evento)
   const maria = deAyer.find((e) => e.hora === '08:00');
   ctx.guardarRegistro({ fecha: ayer, paciente: maria.paciente, tipo: 'Control', ubicacion: 'Escazú', pago1: 35000, forma1: 'SINPE', eventoId: maria.id });
   // 2) importada del Excel: sin ID de evento, mismo día y mismo nombre (más completo)
   ctx.guardarRegistro({ fecha: ayer, paciente: 'Laura Jiménez Mora', tipo: 'Primera vez', ubicacion: 'Escazú', pago1: 50000, forma1: 'SINPE' });
-  // 3) descartada: no es una consulta
-  const gym = deAyer.find((e) => e.titulo === 'Gimnasio');
-  const tras = ctx.descartarEvento(gym, 'No es consulta');
+  // 3) descartada: no se presentó
+  const carlos = deAyer.find((e) => e.hora === '16:00');
+  const tras = ctx.descartarEvento(carlos, 'No se presentó');
   const quedan = tras.pendientes.filter((e) => e.fecha === ayer).map((e) => e.hora);
-  igual(quedan, ['16:00', '14:00', '11:00']);
+  igual(quedan, ['14:00', '11:00']);
   // El mismo nombre en otro día no cuenta como registrado
   assert.ok(tras.pendientes.some((e) => e.fecha === antier && e.paciente === 'Laura Jiménez'));
   // En "Citas del día" la descartada se marca y las registradas salen con ✓
   const dia = ctx.getEventos(ayer).eventos;
-  assert.strictEqual(dia.find((e) => e.titulo === 'Gimnasio').descartado, 'No es consulta');
+  assert.strictEqual(dia.find((e) => e.hora === '16:00').descartado, 'No se presentó');
   assert.strictEqual(dia.find((e) => e.hora === '09:30').registrado, true);
+});
+
+prueba('no registradas: solo citas, no reuniones ni eventos personales', () => {
+  const ctx = nuevoEntorno();
+  ctx._eventosPorCalendario['Escazú HCP'] = [
+    [8, 0, 60, 'Laura Jiménez - Control', ''],          // tipo en el título → cita
+    [9, 0, 60, 'Michelle', ''],                          // un solo nombre, pero ya es paciente → cita
+    [10, 0, 60, 'Pedro Soto', ''],                       // nombre y apellido → cita
+    [11, 0, 60, 'Reunión con Andrea DS', ''],            // palabra "reunión" → no
+    [12, 0, 60, 'Almuerzo', ''],                         // palabra "almuerzo" → no
+    [13, 0, 60, 'Revisión de contenido Instagram', ''],  // palabra "contenido" → no
+    [14, 0, 60, 'Sesión equipo HCP', '', 3],             // invitados sin tipo de cita → no
+    [15, 0, 60, 'Ana Solís - control', '', 1],           // invitados pero dice el tipo → cita
+    [16, 0, 60, 'Equipo marketing', ''],                 // dos palabras sin palabra de la lista: pasa como cita
+    [17, 0, 60, 'Mentoría', ''],                          // una palabra, no es paciente → no
+  ];
+  const u = hoja(ctx, 'Ubicaciones');
+  const col = u.getRange(1, 1, 1, u.getLastColumn()).getValues()[0].indexOf('Calendario') + 1;
+  u.getRange(2, col).setValue('Escazú HCP');
+  const cfg = hoja(ctx, 'Config');
+  const filaDias = cfg.getRange(1, 1, cfg.getLastRow(), 1).getValues().findIndex((r) => r[0] === 'Días hacia atrás para pendientes') + 1;
+  cfg.getRange(filaDias, 2).setValue(1);
+  const hoy = new Date();
+  const ayer = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() - 1);
+  const ayerIso = ayer.getFullYear() + '-' + String(ayer.getMonth() + 1).padStart(2, '0') + '-' + String(ayer.getDate()).padStart(2, '0');
+  // Michelle ya vino antes (otro día)
+  ctx.guardarRegistro({ fecha: '2026-09-19', paciente: 'Michelle', tipo: 'Primera vez', ubicacion: 'Curridabat', pago1: 35000, forma1: 'SINPE' });
+
+  const r = ctx.getPendientes();
+  const deAyer = (lista) => lista.filter((e) => e.fecha === ayerIso).map((e) => e.titulo).sort();
+  igual(deAyer(r.pendientes), ['Ana Solís - control', 'Equipo marketing', 'Laura Jiménez - Control', 'Michelle', 'Pedro Soto']);
+  igual(deAyer(r.ocultos), ['Almuerzo', 'Mentoría', 'Reunión con Andrea DS', 'Revisión de contenido Instagram', 'Sesión equipo HCP']);
+  igual(r.ocultos.filter((e) => e.fecha === ayerIso).map((e) => [e.titulo, e.noEsCita]).sort(), [
+    ['Almuerzo', 'Dice "almuerzo"'],
+    ['Mentoría', 'No parece el nombre de un paciente'],
+    ['Reunión con Andrea DS', 'Dice "reunion"'],
+    ['Revisión de contenido Instagram', 'Dice "contenido"'],
+    ['Sesión equipo HCP', 'Tiene invitados y no dice el tipo de cita'],
+  ]);
+
+  // Lo que se marca "No es consulta" no vuelve a salir aunque sea otro día (reuniones que se repiten)
+  const equipo = r.pendientes.find((e) => e.titulo === 'Equipo marketing');
+  const r2 = ctx.descartarEvento(equipo, 'No es consulta');
+  assert.ok(!r2.pendientes.some((e) => e.titulo === 'Equipo marketing'), 'ningún día');
+  assert.ok(r2.ocultos.some((e) => e.titulo === 'Equipo marketing' && e.noEsCita.includes('No es consulta')));
+
+  // La lista de palabras se puede editar en Config
+  const filaPal = cfg.getRange(1, 1, cfg.getLastRow(), 1).getValues().findIndex((r) => r[0] === 'Eventos que no son citas') + 1;
+  cfg.getRange(filaPal, 2).setValue('reunión, soto');
+  const r3 = ctx.getPendientes();
+  assert.ok(!r3.pendientes.some((e) => e.titulo === 'Pedro Soto'));
+  assert.ok(r3.pendientes.some((e) => e.titulo === 'Almuerzo') === false, '"Almuerzo" sigue fuera: una sola palabra');
 });
 
 prueba('descartar varias citas a la vez', () => {

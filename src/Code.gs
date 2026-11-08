@@ -47,6 +47,8 @@ const CONFIG_INICIAL = [
   ['Solo eventos que contengan', '', 'Opcional: muestra solo eventos cuyo título contenga este texto.'],
   ['Carpeta de reportes', 'Hábitos con propósito · Reportes', 'Carpeta de Drive donde se guardan los reportes exportados.'],
   ['Días hacia atrás para pendientes', 30, 'Cuántos días atrás revisa la app las citas del calendario que faltan por registrar.'],
+  ['Eventos que no son citas', 'reunión, reuniones, meeting, junta, llamada, videollamada, call, zoom, meet, teams, webinar, capacitación, clase, curso, taller, charla, conferencia, almuerzo, cena, cumpleaños, gimnasio, gym, entreno, dentista, médico, banco, trámite, viaje, vuelo, vacaciones, feriado, personal, bloqueo, bloqueado, ocupado, no disponible, recordatorio, pago, factura, contabilidad, planificación, grabación, contenido, instagram, podcast, entrevista, planificar, tareas, oficina, administrativo, compras, supermercado',
+    'Palabras que marcan un evento como no-cita (reuniones, personales…). Esos eventos no salen en "No registradas". Separadas por coma.'],
 ];
 
 /** Tarifas iniciales (por persona en pareja). Solo se cargan si la hoja Tarifas está vacía. */
@@ -419,10 +421,45 @@ function getPendientes() {
   const avisos = [];
   const regs = leerRegistros_().map(function (x) { return x.reg; });
   const descartados = eventosDescartados_();
-  const pendientes = eventosEntre_(ini, ahora, cfg, cats, avisos)
+  const criterio = criterioCita_(cfg, regs, descartados);
+  const sinRegistrar = eventosEntre_(ini, ahora, cfg, cats, avisos)
     .filter(function (e) { return e.inicioMs <= ahora.getTime() && !descartados[e.id] && !yaRegistrado_(e, regs); })
     .reverse();   // lo más reciente primero
-  return { pendientes: pendientes, dias: dias, error: avisos.join(' ') };
+  const pendientes = [];
+  const ocultos = [];
+  sinRegistrar.forEach(function (e) {
+    const motivo = criterio(e);
+    if (motivo) { e.noEsCita = motivo; ocultos.push(e); } else pendientes.push(e);
+  });
+  return { pendientes: pendientes, ocultos: ocultos, dias: dias, error: avisos.join(' ') };
+}
+
+/**
+ * Devuelve una función que dice por qué un evento NO parece una cita ('' si sí parece).
+ * Parece cita: el título dice el tipo (control, primera vez, pareja, medición), el nombre es de un
+ * paciente de la bitácora, o parece nombre y apellido. No parece cita: tiene una palabra de
+ * Config → "Eventos que no son citas", su título ya se marcó como "No es consulta", o tiene
+ * invitados sin decir el tipo de cita.
+ */
+function criterioCita_(cfg, regs, descartados) {
+  const palabras = listaConfig_(cfg['Eventos que no son citas']).map(normTxt_).filter(Boolean);
+  const titulosNoCita = descartados._titulosNoCita || {};
+  const pacientes = pacientes_(regs).map(function (p) { return p.n; });
+  const tienePalabra = function (texto, palabra) {
+    return (' ' + texto.replace(/[^a-z0-9ñ ]/g, ' ').replace(/\s+/g, ' ') + ' ').indexOf(' ' + palabra + ' ') >= 0;
+  };
+  return function (e) {
+    const t = normTxt_(e.titulo);
+    if (titulosNoCita[t]) return 'Ya se marcó como "No es consulta"';
+    const palabra = palabras.filter(function (p) { return tienePalabra(t, p); })[0];
+    if (palabra) return 'Dice "' + palabra + '"';
+    if (e.tipo) return '';
+    const conocido = pacientes.some(function (n) { return mismoNombre_(n, e.paciente) || mismoNombre_(n, e.paciente2); });
+    if (conocido) return '';
+    if (e.invitados) return 'Tiene invitados y no dice el tipo de cita';
+    if (normTxt_(e.paciente).split(' ').filter(Boolean).length < 2) return 'No parece el nombre de un paciente';
+    return '';
+  };
 }
 
 /** Marca una cita del calendario como "no se registra" (no vino, cancelada, no es consulta). */
@@ -458,9 +495,15 @@ function crearDescartados_(ss) {
 
 function eventosDescartados_() {
   const out = {};
+  const titulosNoCita = {};
   leerTabla_(HOJAS.descartados).forEach(function (r) {
-    if (r['Evento']) out[String(r['Evento']).trim()] = String(r['Motivo'] || 'Descartada');
+    if (!r['Evento']) return;
+    const motivo = String(r['Motivo'] || 'Descartada');
+    out[String(r['Evento']).trim()] = motivo;
+    if (normTxt_(motivo) === 'no es consulta' && r['Título']) titulosNoCita[normTxt_(r['Título'])] = true;
   });
+  // Propiedad no enumerable: no se confunde con un ID de evento.
+  Object.defineProperty(out, '_titulosNoCita', { value: titulosNoCita, enumerable: false });
   return out;
 }
 
@@ -495,8 +538,10 @@ function eventosEntre_(ini, fin, cfg, cats, avisos) {
     try {
       c.cal.getEvents(ini, fin).forEach(function (e) {
         if (e.isAllDayEvent()) return;
+        let invitados = 0;
+        try { invitados = (e.getGuestList() || []).length; } catch (err) { /* sin permiso para ver invitados */ }
         crudos.push({ id: e.getId(), titulo: e.getTitle(), lugar: e.getLocation() || '',
-          inicio: e.getStartTime(), fin: e.getEndTime(), fuente: 'Google', ubicacion: c.ubicacion });
+          inicio: e.getStartTime(), fin: e.getEndTime(), fuente: 'Google', ubicacion: c.ubicacion, invitados: invitados });
       });
     } catch (err) {
       avisos.push('No se pudo leer un calendario de Google: ' + err.message);
@@ -536,6 +581,7 @@ function eventosEntre_(ini, fin, cfg, cats, avisos) {
         hora: Utilities.formatDate(e.inicio, TZ, 'HH:mm'),
         horaFin: e.fin ? Utilities.formatDate(e.fin, TZ, 'HH:mm') : '',
         inicioMs: e.inicio.getTime(),
+        invitados: e.invitados || 0,
         paciente: sug.paciente,
         paciente2: sug.paciente2,
         tipo: sug.tipo,

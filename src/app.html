@@ -54,6 +54,8 @@
     pendientes: [],
     pendDias: 30,
     pendSel: new Set(),
+    ocultos: [],
+    verOcultos: false,
     eventoSel: '',
     pedidoEventos: 0,
     reporte: null,
@@ -337,6 +339,7 @@
 
   function recibirPendientes(r) {
     S.pendientes = r.pendientes || [];
+    S.ocultos = r.ocultos || [];
     S.pendDias = r.dias || S.pendDias;
     const vigentes = new Set(S.pendientes.map((e) => e.id));
     S.pendSel = new Set([...S.pendSel].filter((id) => vigentes.has(id)));
@@ -372,6 +375,29 @@
     }));
     $$('#pendLista .pend-info').forEach((b) => b.addEventListener('click', () => registrarPendiente(S.pendientes[+b.dataset.i])));
     actualizarBarraPend();
+    pintarOcultos();
+  }
+
+  /** Eventos que no parecen citas (reuniones, personales…): ocultos, pero se pueden ver y registrar. */
+  function pintarOcultos() {
+    const k = S.ocultos.length;
+    $('#ocultosWrap').classList.toggle('oculto', !k);
+    if (!k) return;
+    $('#btnOcultos').textContent = (S.verOcultos ? '▾ ' : '▸ ') + 'Se ocultaron ' + k +
+      (k === 1 ? ' evento que no parece cita' : ' eventos que no parecen citas') + ' (reuniones, personales…). ' +
+      (S.verOcultos ? 'Ocultar' : 'Ver');
+    $('#btnOcultos').setAttribute('aria-expanded', String(!!S.verOcultos));
+    $('#ocultosLista').classList.toggle('oculto', !S.verOcultos);
+    $('#ocultosLista').innerHTML = S.ocultos.map((e, i) =>
+      '<div class="pend-item">' +
+        '<button type="button" class="pend-info" data-i="' + i + '">' +
+          '<div class="pend-fecha">' + esc(fechaCorta(e.fecha)) + ' · ' + esc(e.hora) +
+            (e.ubicacion ? '<span class="tag">' + esc(e.ubicacion) + '</span>' : '') + '</div>' +
+          '<div class="pend-titulo">' + esc(e.titulo) + '</div>' +
+          '<div class="pend-motivo">' + esc(e.noEsCita) + ' · tocar para registrarla igual</div>' +
+        '</button>' +
+      '</div>').join('');
+    $$('#ocultosLista .pend-info').forEach((b) => b.addEventListener('click', () => registrarPendiente(S.ocultos[+b.dataset.i])));
   }
 
   function actualizarBarraPend() {
@@ -775,6 +801,7 @@
     });
     $('#btnPendLimpiar').addEventListener('click', () => { S.pendSel.clear(); pintarPendientes(); });
     $('#btnMarcar').addEventListener('click', marcarSeleccionadas);
+    $('#btnOcultos').addEventListener('click', () => { S.verOcultos = !S.verOcultos; pintarOcultos(); });
     $('#diaAnt').addEventListener('click', () => moverDia(-1));
     $('#diaSig').addEventListener('click', () => moverDia(1));
     $('#diaHoy').addEventListener('click', () => irADia(iso(new Date())));
