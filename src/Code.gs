@@ -165,13 +165,18 @@ function setup() {
   crearDescartados_(ss);
   sincronizarTarifas();
 
-  // Orden de pestañas
-  [HOJAS.registros, HOJAS.tarifas, HOJAS.ubicaciones, HOJAS.aseguradoras, HOJAS.descuentos, HOJAS.tipos, HOJAS.formas, HOJAS.config, HOJAS.descartados]
-    .forEach(function (n, i) {
-      const sh = ss.getSheetByName(n);
-      if (sh) { ss.setActiveSheet(sh); ss.moveActiveSheet(i + 1); }
-    });
-  ss.setActiveSheet(ss.getSheetByName(HOJAS.registros));
+  // Orden de pestañas. Activar una pestaña la vuelve a mostrar, así que se recuerdan las que
+  // estaban ocultas y se ocultan de nuevo al final.
+  const orden = [HOJAS.registros, HOJAS.tarifas, HOJAS.ubicaciones, HOJAS.aseguradoras, HOJAS.descuentos,
+    HOJAS.tipos, HOJAS.formas, HOJAS.config, HOJAS.descartados];
+  const ocultas = ss.getSheets().filter(function (sh) { return sh.isSheetHidden(); });
+  orden.forEach(function (n, i) {
+    const sh = ss.getSheetByName(n);
+    if (sh) { ss.setActiveSheet(sh); ss.moveActiveSheet(i + 1); }
+  });
+  const visible = ss.getSheets().filter(function (sh) { return ocultas.indexOf(sh) < 0; })[0];
+  if (visible) ss.setActiveSheet(visible);
+  ocultas.forEach(function (sh) { sh.hideSheet(); });
 
   // Borrar la hoja vacía que trae un archivo nuevo
   ['Hoja 1', 'Sheet1', 'Hoja1'].forEach(function (n) {

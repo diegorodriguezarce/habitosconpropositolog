@@ -52,6 +52,9 @@
     deleteRow(f) { this._d.splice(f - 1, 1); return this; },
     deleteRows(f, n) { this._d.splice(f - 1, n); return this; },
     getBandings() { return []; },
+    isSheetHidden() { return !!this._oculta; },
+    hideSheet() { this._oculta = true; return this; },
+    showSheet() { this._oculta = false; return this; },
   };
 
   function Rango(hoja, fila, col, nf, nc) {
@@ -120,7 +123,7 @@
       return h;
     },
     deleteSheet(h) { this._hojas = this._hojas.filter((x) => x !== h); },
-    setActiveSheet(h) { this._activa = h; return h; },
+    setActiveSheet(h) { this._activa = h; h.showSheet(); return h; },
     moveActiveSheet(pos) {
       const i = this._hojas.indexOf(this._activa);
       if (i >= 0) { this._hojas.splice(i, 1); this._hojas.splice(pos - 1, 0, this._activa); }

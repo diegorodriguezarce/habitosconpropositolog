@@ -462,6 +462,21 @@ prueba('no registradas: solo citas, no reuniones ni eventos personales', () => {
   assert.ok(r3.pendientes.some((e) => e.titulo === 'Almuerzo') === false, '"Almuerzo" sigue fuera: una sola palabra');
 });
 
+prueba('pestañas ocultas: la app sigue funcionando y reparar hojas no las muestra', () => {
+  const ctx = nuevoEntorno();
+  ['Tarifas', 'Ubicaciones', 'Aseguradoras', 'Descuentos', 'Tipos de cita', 'Formas de pago', 'Config', 'Eventos descartados', 'Registros']
+    .forEach((n) => hoja(ctx, n).hideSheet());
+  ctx.setup();
+  const ocultas = ctx._libro.getSheets().filter((h) => h.isSheetHidden()).map((h) => h.getName());
+  igual(ocultas, ['Registros', 'Tarifas', 'Ubicaciones', 'Aseguradoras', 'Descuentos', 'Tipos de cita', 'Formas de pago', 'Config',
+    'Eventos descartados']);
+  const b = ctx.getBootstrap();
+  assert.strictEqual(b.tarifas['Control']['Escazú'], 35000);
+  const r = ctx.guardarRegistro({ fecha: '2026-10-01', paciente: 'A', tipo: 'Control', ubicacion: 'Escazú', pago1: 35000, forma1: 'SINPE' });
+  assert.strictEqual(r.recientes.length, 1);
+  assert.strictEqual(ctx.getReporteMes('2026-10').totales.facturado, 35000);
+});
+
 prueba('descartar varias citas a la vez', () => {
   const ctx = nuevoEntorno();
   const cfg = hoja(ctx, 'Config');
