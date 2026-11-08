@@ -868,6 +868,7 @@
       const nombre = b.encabezado || b.nutricionista;
       $('#saludo').textContent = saludo + (nombre ? ', ' + nombre : '') + ' · ' + fechaLarga(b.hoy);
       $('#fecha').value = b.hoy;
+      $('#pie').textContent = 'Hábitos con propósito · Bitácora · versión ' + (b.version || '—');
       $('#mes').value = b.hoy.slice(0, 7);
       pintarRecientes();
       actualizarVista();

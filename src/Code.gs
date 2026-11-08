@@ -6,6 +6,9 @@
  * catálogos desde hojas editables y genera reportes mensuales.
  */
 
+/** Versión del código: se ve al pie de la app. Subirla en cada cambio (ver ACTUALIZAR.md). */
+const VERSION_APP = '1.1';
+
 const TZ = 'America/Costa_Rica';
 
 const HOJAS = {
@@ -387,6 +390,7 @@ function getBootstrap() {
     pacientes: pacientes_(regs),
     recientes: recientes_(regs, 10),
     hoy: Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd'),
+    version: VERSION_APP,
     nutricionista: cfg['Nutricionista'] || '',
     encabezado: cfg['Nombre en el encabezado'] || cfg['Nutricionista'] || '',
   };
