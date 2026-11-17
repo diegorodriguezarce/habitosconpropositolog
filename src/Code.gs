@@ -7,7 +7,7 @@
  */
 
 /** Versión del código: se ve al pie de la app. Subirla en cada cambio (ver ACTUALIZAR.md). */
-const VERSION_APP = '1.1';
+const VERSION_APP = '1.2';
 
 const TZ = 'America/Costa_Rica';
 
@@ -116,13 +116,15 @@ function setup() {
     ['Pareja control', 'Sí', 'Sí'],
     ['Mediciones', 'No', 'Sí'],
   ], [180, 90, 70], function (sh) {
-    sh.getRange(1, 2).setNote('Sí = cita de dos personas: pide dos nombres y la tarifa se cobra por persona.');
+    sh.getRange(1, 2).setNote('Sí = cita de pareja. Cada persona se registra por separado con la tarifa por persona; ' +
+      '"Viene con" es opcional, solo de referencia.');
   });
 
   crearCatalogo_(ss, HOJAS.ubicaciones, ['Ubicación', 'Encargado / a quién se paga', '% comisión', 'Base de comisión', 'Activa', 'Calendario'], [
     ['Escazú', 'Andrea R.', 0.4, 'Total facturado', 'Sí', ''],
     ['Curridabat', 'Raquel D.', 0.4, 'Total facturado', 'Sí', ''],
     ['Domicilio', 'Andrea R.', 0.2, 'Total facturado', 'Sí', ''],
+    ['Virtual', '', 0, 'Total facturado', 'Sí', ''],
   ], [130, 240, 100, 140, 70, 260], function (sh) {
     sh.getRange(2, 3, sh.getMaxRows() - 1, 1).setNumberFormat('0.##%');
     sh.getRange(2, 4, sh.getMaxRows() - 1, 1).setDataValidation(
@@ -150,6 +152,7 @@ function setup() {
 
   crearCatalogo_(ss, HOJAS.descuentos, ['Descuento', '% descuento', 'Ubicaciones', 'Excepto tipos', 'Activo'], [
     ['VOLK', 0.1, 'Domicilio', 'Mediciones', 'Sí'],
+    ['Convenio Bicell', 0.15, 'Escazú', '', 'Sí'],
   ], [140, 110, 200, 200, 70], function (sh) {
     sh.getRange(2, 2, sh.getMaxRows() - 1, 1).setNumberFormat('0.##%');
     sh.getRange(1, 3).setNote('Ubicaciones donde aplica, separadas por coma. Vacío = todas.');
@@ -277,7 +280,13 @@ function completarCatalogo_(sh, headers, iniciales, renombrar) {
   iniciales.forEach(function (ini) {
     const clave = normTxt_(ini[0]);
     const fila = v.slice(1).filter(function (r) { return normTxt_(r[0]) === clave; })[0];
-    if (!fila) return;
+    if (!fila) {
+      // Fila inicial nueva (p. ej. una ubicación o un descuento agregados en una versión nueva).
+      const nueva = cab.map(function () { return ''; });
+      headers.forEach(function (h, i) { nueva[cab.indexOf(h)] = ini[i]; });
+      v.push(nueva);
+      return;
+    }
     headers.forEach(function (h, i) {
       const j = cab.indexOf(h);
       if ((fila[j] === '' || fila[j] == null) && ini[i] !== '') fila[j] = ini[i];
@@ -524,8 +533,8 @@ function yaRegistrado_(e, regs) {
   return regs.some(function (r) {
     if (r.eventoId) return r.eventoId === e.id;
     if (r.fecha !== e.fecha) return false;
-    return [r.paciente, r.paciente2].some(function (n) {
-      return mismoNombre_(n, e.paciente) || mismoNombre_(n, e.paciente2);
+    return [r.paciente].concat(dosPersonas_(r) ? [r.paciente2] : []).some(function (n) {
+      return mismoNombre_(n, e.paciente) || (!e.paciente2 ? false : mismoNombre_(n, e.paciente2) && dosPersonas_(r));
     });
   });
 }
@@ -776,8 +785,8 @@ function normalizarRegistro_(d, cats, tarifas) {
   if (!ubicacion) faltan.push('ubicación');
   const paciente = s(d.paciente);
   if (!paciente) faltan.push('nombre del paciente');
+  // En pareja cada persona se registra aparte; "Viene con" (paciente2) es opcional.
   const paciente2 = pareja ? s(d.paciente2) : '';
-  if (pareja && !paciente2) faltan.push('nombre de la segunda persona');
 
   const conSeguro = d.conSeguro === true || esSi_(d.conSeguro);
   const aseguradora = conSeguro ? s(d.aseguradora) : '';
@@ -806,8 +815,8 @@ function normalizarRegistro_(d, cats, tarifas) {
   if (conSeguro && aseg && excluyeTipo_(aseg.exceptoTipos, tipo)) {
     throw new Error(aseguradora + ' no aplica a ' + tipo + '.');
   }
-  const personas = pareja ? 2 : 1;
-  const tarifa = typeof tarifaBase === 'number' ? tarifaBase * personas : '';
+  // La tarifa es por persona (en pareja, la mitad de la cita).
+  const tarifa = typeof tarifaBase === 'number' ? tarifaBase : '';
   const descuento = conSeguro ? '' : s(d.descuento);
   let montoDescuento = '';
   if (descuento) {
@@ -1332,7 +1341,7 @@ function resumen_(regs, cats) {
   const obtener = function (mapa, k, init) { if (!mapa[k]) mapa[k] = init(); return mapa[k]; };
 
   regs.forEach(function (r) {
-    const personas = r.paciente2 ? 2 : 1;
+    const personas = dosPersonas_(r) ? 2 : 1;
     const comision = comisionDe_(r, cfgUbic);
     tot.consultas++;
     tot.personas += personas;
@@ -1630,8 +1639,14 @@ function escritor_(sh) {
   };
 }
 
+/** Registro de pareja con las dos personas juntas (registros viejos, importados del Excel). */
+function dosPersonas_(r) {
+  return !!(r.paciente2 && r.pago2 > 0);
+}
+
 function nombres_(r) {
-  return r.paciente2 ? r.paciente + ' y ' + r.paciente2 : r.paciente;
+  if (!r.paciente2) return r.paciente;
+  return dosPersonas_(r) ? r.paciente + ' y ' + r.paciente2 : r.paciente + ' (viene con ' + r.paciente2 + ')';
 }
 
 function moverACarpeta_(id) {

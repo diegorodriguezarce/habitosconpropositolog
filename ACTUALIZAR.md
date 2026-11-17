@@ -19,7 +19,8 @@
 
 | Versión | Qué cambió | Archivos a pegar | ¿Reparar hojas? |
 |---|---|---|---|
-| **1.1** | Número de versión al pie del app. Desde aquí cada actualización se anota en esta tabla. | `Code.gs`, `index`, `styles`, `app` | No |
+| **1.2** | Modalidad **Virtual** (su calendario en Ubicaciones → Calendario; monto a mano, sin comisión). **Pareja**: cada persona se registra por separado con la tarifa por persona; "Viene con" es opcional. Descuento **Convenio Bicell** 15 % en Escazú. | `Code.gs`, `index`, `app` | **Sí** |
+| 1.1 | Número de versión al pie del app. Desde aquí cada actualización se anota en esta tabla. | `Code.gs`, `index`, `styles`, `app` | No |
 | 1.0 | Base desplegada: registro con tarifas, Sana Sana, VOLK y "Otro"; calendarios por sede; pestaña *No registradas* (solo citas); reportes y liquidaciones (resumen por persona); logo oficial; "Doctora Moni"; filtro en Registros; pestañas ocultas respetadas. | Todos | Sí |
 
 > **Para Diego:** en cada cambio, subir `VERSION_APP` en `src/Code.gs` y agregar una fila arriba en esta tabla.

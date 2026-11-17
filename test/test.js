@@ -66,6 +66,8 @@ prueba('setup crea las hojas con tarifas, comisiones, seguro y descuento inicial
     ['Curridabat', 'Raquel D.', 0.4],
     ['Domicilio', 'Andrea R.', 0.2],
   ]);
+  igual(hoja(ctx, 'Ubicaciones').getRange(5, 1, 1, 3).getValues(), [['Virtual', '', 0]]);
+  igual(hoja(ctx, 'Descuentos').getRange(2, 1, 2, 3).getValues(), [['VOLK', 0.1, 'Domicilio'], ['Convenio Bicell', 0.15, 'Escazú']]);
 });
 
 prueba('setup sobre una hoja vieja completa vacíos sin pisar datos', () => {
@@ -108,9 +110,10 @@ prueba('bootstrap entrega catálogos y nada con Date', () => {
   const b = ctx.getBootstrap();
   sinFechas(b);
   igual(b.cats.formas, ['SINPE', 'Tarjeta']);
-  igual(b.cats.ubicaciones.map((u) => [u.nombre, u.porcentaje]), [['Escazú', 0.4], ['Curridabat', 0.4], ['Domicilio', 0.2]]);
+  igual(b.cats.ubicaciones.map((u) => [u.nombre, u.porcentaje]), [['Escazú', 0.4], ['Curridabat', 0.4], ['Domicilio', 0.2], ['Virtual', 0]]);
   igual(b.cats.aseguradoras, [{ nombre: 'Sana Sana', monto: 8500, montoPaciente: 16000, ubicaciones: ['Escazú'], exceptoTipos: SIN_SEGURO }]);
-  igual(b.cats.descuentos, [{ nombre: 'VOLK', porcentaje: 0.1, ubicaciones: ['Domicilio'], exceptoTipos: ['Mediciones'] }]);
+  igual(b.cats.descuentos, [{ nombre: 'VOLK', porcentaje: 0.1, ubicaciones: ['Domicilio'], exceptoTipos: ['Mediciones'] },
+    { nombre: 'Convenio Bicell', porcentaje: 0.15, ubicaciones: ['Escazú'], exceptoTipos: [] }]);
   assert.strictEqual(b.tarifas['Primera vez']['Curridabat'], 40000);
   assert.strictEqual(b.tarifas['Mediciones']['Curridabat'], false);
   assert.strictEqual(b.cats.tipos.filter((t) => t.pareja).length, 2);
@@ -135,15 +138,20 @@ prueba('consulta simple: fecha real, hora texto, tarifa de lista', () => {
   assert.strictEqual(r.pacientes[0].n, 'María Fernández');
 });
 
-prueba('pareja: tarifa por persona y dos pagos', () => {
+prueba('pareja: cada persona por separado, tarifa por persona, "viene con" opcional', () => {
   const ctx = nuevoEntorno();
-  const r = ctx.guardarRegistro({
+  const ana = ctx.guardarRegistro({
     fecha: '2026-10-14', paciente: 'Ana Solís', paciente2: 'Luis Mora', tipo: 'Pareja primera vez', ubicacion: 'Curridabat',
-    dosPagos: true, pago1: 35000, forma1: 'SINPE', pago2: 35000, forma2: 'Tarjeta',
+    pago1: 35000, forma1: 'SINPE',
   }).registro;
-  assert.strictEqual(r.tarifa, 70000);
-  assert.strictEqual(r.totalPaciente, 70000);
-  assert.strictEqual(r.paciente2, 'Luis Mora');
+  igual([ana.tarifa, ana.totalFacturado, ana.paciente2], [35000, 35000, 'Luis Mora']);
+  // La otra persona, sin "viene con"
+  const luis = ctx.guardarRegistro({
+    fecha: '2026-10-14', paciente: 'Luis Mora', tipo: 'Pareja primera vez', ubicacion: 'Curridabat', pago1: 35000, forma1: 'Tarjeta',
+  }).registro;
+  igual([luis.tarifa, luis.paciente2], [35000, '']);
+  const r = ctx.getReporteMes('2026-10');
+  igual([r.totales.consultas, r.totales.personas, r.totales.facturado], [2, 2, 70000]);
 });
 
 prueba('Sana Sana: 16 000 paciente + 8 500 aseguradora, solo en Escazú y no en pareja ni Mediciones', () => {
@@ -174,9 +182,18 @@ prueba('descuento VOLK: 10% en Domicilio, no en Mediciones ni otras sedes', () =
   assert.strictEqual(r.tarifa, 30000);
   assert.strictEqual(r.montoDescuento, 3000);
   assert.strictEqual(r.descuento, 'VOLK');
-  const p = g({ tipo: 'Pareja control', ubicacion: 'Domicilio', paciente2: 'Y', pago1: 45000 });
-  assert.strictEqual(p.tarifa, 50000);
-  assert.strictEqual(p.montoDescuento, 5000);
+  const p = g({ tipo: 'Pareja control', ubicacion: 'Domicilio', pago1: 22500 });
+  assert.strictEqual(p.tarifa, 25000);
+  assert.strictEqual(p.montoDescuento, 2500);
+  // Convenio Bicell: 15 % solo en Escazú
+  const b = g({ tipo: 'Control', ubicacion: 'Escazú', descuento: 'Convenio Bicell', pago1: 29750 });
+  igual([b.tarifa, b.montoDescuento, b.totalFacturado], [35000, 5250, 29750]);
+  assert.throws(() => g({ tipo: 'Control', ubicacion: 'Curridabat', descuento: 'Convenio Bicell', pago1: 25500 }),
+    /Convenio Bicell no aplica a Control en Curridabat/);
+  // Virtual: sin tarifa, monto digitado y sin comisión
+  const v = g({ tipo: 'Control', ubicacion: 'Virtual', descuento: '', pago1: 28000 });
+  igual([v.tarifa, v.totalFacturado], [null, 28000]);
+  assert.strictEqual(ctx.getReporteMes('2026-10').ubicaciones.find((u) => u.nombre === 'Virtual').comision, 0);
   assert.throws(() => g({ tipo: 'Mediciones', ubicacion: 'Domicilio', pago1: 12000 }), /VOLK no aplica a Mediciones/);
   assert.throws(() => g({ tipo: 'Control', ubicacion: 'Escazú', pago1: 31500 }), /no aplica a Control en Escazú/);
 });
@@ -195,7 +212,6 @@ prueba('validaciones', () => {
   const falla = (cambio, texto) => assert.throws(() => ctx.guardarRegistro(Object.assign({}, base, cambio)), (e) => e.message.includes(texto));
   falla({ fecha: '13/10/2026' }, 'fecha');
   falla({ paciente: ' ' }, 'nombre del paciente');
-  falla({ tipo: 'Pareja control' }, 'segunda persona');
   falla({ conSeguro: true }, 'aseguradora');
   falla({ forma1: '' }, 'forma de pago');
   falla({ pago1: -5 }, 'montos válidos');
@@ -243,7 +259,7 @@ prueba('reporte del mes: parte de cada sede, de Moni y por colaboradora', () => 
   sinFechas(r);
   assert.strictEqual(r.etiqueta, 'Octubre 2026');
   const t = r.totales;
-  igual([t.consultas, t.personas, t.facturado, t.descuentos, t.porCobrar], [4, 5, 149500, 5000, 8500]);
+  igual([t.consultas, t.personas, t.facturado, t.descuentos, t.porCobrar], [4, 5, 149500, 2500, 8500]);
   igual(r.ubicaciones.map((u) => [u.nombre, u.facturado, u.comision, u.nutricionista]), [
     ['Escazú', 74500, 29800, 44700],
     ['Curridabat', 30000, 12000, 18000],

@@ -95,7 +95,6 @@
   const val = (id) => $('#' + id).value;
   const num = (id) => { const v = val(id); return v === '' ? 0 : Math.max(0, Math.round(Number(v)) || 0); };
 
-  const personas = () => (esPareja() ? 2 : 1);
   const aplicaEn = (lista, u) => !lista || !lista.length || lista.some((x) => norm(x) === norm(u));
   const pct = (p) => (Math.round(p * 1000) / 10).toLocaleString('es-CR') + '%';
 
@@ -108,7 +107,7 @@
   }
   function tarifaLista() {
     const t = tarifaActual();
-    return typeof t === 'number' ? t * personas() : null;
+    return typeof t === 'number' ? t : null;
   }
   const excluye = (lista, tipo) => (lista || []).some((x) => norm(x) === norm(tipo));
   const aseguradorasAqui = () => S.cats.aseguradoras.filter((a) =>
@@ -187,21 +186,19 @@
     const pareja = esPareja();
     const seguro = conSeguro();
     const dos = dosPagos();
-    const p1 = val('paciente').trim();
-    const p2 = val('paciente2').trim();
 
     $('#grupoPaciente2').classList.toggle('oculto', !pareja);
-    $('#tituloPacientes').textContent = pareja ? 'Pareja' : 'Paciente';
-    $('#lblPaciente').textContent = pareja ? 'Nombre de la primera persona' : 'Nombre completo';
+    $('#tituloPacientes').textContent = pareja ? 'Paciente (cita de pareja)' : 'Paciente';
+    $('#lblPaciente').textContent = 'Nombre completo';
     $('#bloqueSeguro').classList.toggle('oculto', !seguro);
     $('#grupoPago2').classList.toggle('oculto', !dos);
-    $('#lblDosPagos').textContent = pareja ? 'Pagan por separado' : 'Dividir en dos pagos';
+    $('#lblDosPagos').textContent = 'Dividir en dos pagos';
 
     if (dos) {
-      $('#lblPago1').textContent = pareja ? 'Paga ' + (p1.split(' ')[0] || 'persona 1') : 'Primer pago';
-      $('#lblPago2').textContent = pareja ? 'Paga ' + (p2.split(' ')[0] || 'persona 2') : 'Segundo pago';
+      $('#lblPago1').textContent = 'Primer pago';
+      $('#lblPago2').textContent = 'Segundo pago';
     } else {
-      $('#lblPago1').textContent = seguro ? 'Paga el paciente' : (pareja ? 'Monto (ambos)' : 'Monto');
+      $('#lblPago1').textContent = seguro ? 'Paga el paciente' : 'Monto';
     }
 
     const tipo = getChip('tipo');
@@ -507,7 +504,6 @@
     if (!d.tipo) marca('.chips[data-name=tipo]', 'tipo de cita');
     if (!d.ubicacion) marca('.chips[data-name=ubicacion]', 'ubicación');
     if (!d.paciente) marca('#paciente', 'nombre');
-    if (esPareja() && !d.paciente2) marca('#paciente2', 'segunda persona');
     if (d.conSeguro && !d.aseguradora) marca('.chips[data-name=aseguradora]', 'aseguradora');
     if (val('pago1') === '') marca('#pago1', 'monto');
     if (d.pago1 > 0 && !d.forma1) marca('.chips[data-name=forma1]', 'forma de pago');
@@ -639,7 +635,8 @@
       return '<button type="button" class="reg" data-i="' + i + '">' +
         '<span class="reg-fecha">' + esc(fechaCorta(r.fecha)) + (r.hora ? ' · ' + esc(r.hora) : '') +
           '<span class="tag">' + esc(r.ubicacion) + '</span></span>' +
-        '<span class="reg-nombre">' + esc(r.paciente) + (r.paciente2 ? ' y ' + esc(r.paciente2) : '') + '</span>' +
+        '<span class="reg-nombre">' + esc(r.paciente) +
+          (r.paciente2 ? (r.pago2 > 0 ? ' y ' : ' · con ') + esc(r.paciente2) : '') + '</span>' +
         '<span class="reg-meta">' + esc(r.tipo) + (formas ? ' · ' + esc(formas) : '') +
           (r.conSeguro ? '<span class="tag ' + esc(r.estadoAseguradora) + '">' + esc(r.aseguradora) + ' · ' + esc(r.estadoAseguradora) + '</span>' : '') +
           (r.descuento ? '<span class="tag desc">' + esc(r.descuento) + '</span>' : '') +
@@ -813,12 +810,17 @@
 
   function construirChips() {
     const c = S.cats;
-    chips('tipo', c.tipos.map((t) => t.nombre), () => {
-      S.tipoManual = true;
+    // Al cambiar tipo o ubicación: si no hay tarifa (p. ej. Virtual), el monto queda vacío para digitarlo.
+    const alCambiarCita = () => {
       actualizarVista();
+      if (!conSeguro() && getChip('tipo') && getChip('ubicacion') && tarifaActual() === null) {
+        $('#pago1').value = '';
+        $('#pago2').value = '';
+      }
       repartirPagos();
-    });
-    chips('ubicacion', c.ubicaciones.map((u) => u.nombre), () => { actualizarVista(); repartirPagos(); });
+    };
+    chips('tipo', c.tipos.map((t) => t.nombre), () => { S.tipoManual = true; alCambiarCita(); });
+    chips('ubicacion', c.ubicaciones.map((u) => u.nombre), alCambiarCita);
     chips('conSeguro', ['No', 'Sí'], (v) => {
       if (v === 'Sí') {
         const aqui = aseguradorasAqui();
